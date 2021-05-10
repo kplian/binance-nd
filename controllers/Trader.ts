@@ -20,12 +20,12 @@ const Binance = require('node-binance-api');
 
 
 class Trader extends Controller {
-    @Post()  
+    @Post()
     @ReadOnly(false)
-    @Authentication(true) 
+    @Authentication(true)
     async getBalance(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
-           
-        const  trader = await __(TraderModel.findOne(params.traderId as number)); 
+
+        const  trader = await __(TraderModel.findOne(params.traderId as number));
         const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret: trader.apiSecret;
         const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId: trader.apiId;
         const binance = new Binance().options({
@@ -34,7 +34,15 @@ class Trader extends Controller {
             test: process.env.NODE_ENV == 'development' ? true : false
         });
         const response = await binance.futuresBalance();
-        return response;    
+        return response;
+    }
+
+    @Post()
+    @ReadOnly(false)
+    @Authentication(true)
+    async cancel(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+
+        return { success: true }
     }
 }
 
