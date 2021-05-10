@@ -19,6 +19,7 @@ import SymbolModel from '../entity/Symbol';
 import axios, { AxiosRequestConfig } from 'axios';
 import crypto from 'crypto';
 import TraderSignal from '../entity/TraderSignal';
+import TraderChannel from '../entity/TraderChannel';
 const Binance = require('node-binance-api');
 
 
@@ -51,7 +52,7 @@ class Signal extends Controller {
         //check duplicates
         const duplicatesCount = await manager.query(` SELECT count(*) 
                                                       FROM tbin_signal 
-                                                      WHERE symbol = '${messageRead.symbol}' and created_at::date = now()::date and status in ('open', 'closed')`);
+                                                      WHERE symbol = '${messageRead.symbol}' and created_at + interval '3 hours' > now() and status in ('open', 'closed')`);
 
         if (duplicatesCount[0].count != '0') {
           status = 'duplicate'; 
@@ -90,6 +91,59 @@ class Signal extends Controller {
 
   @Post()  
   @ReadOnly(false)
+  @Authentication(true)    
+  async addForm(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+    
+    let markPrice = 0;        
+    let status = 'not_identified';    
+    if (params.symbol) {
+        status = 'open';            
+        markPrice = await __(this.binanceGetMarkPrice(params.symbol as string));
+        status = this.validateData(params, markPrice);
+    }
+
+    if (status != 'open') {
+      throw new PxpError(400, 'this error happened:' + status);
+    }
+
+    //check duplicates
+    const duplicatesCount = await manager.query(` SELECT count(*) 
+                                                  FROM tbin_signal 
+                                                  WHERE symbol = '${params.symbol}' and created_at + interval '3 hours' > now() and status in ('open', 'closed')`);
+
+    if (duplicatesCount[0].count != '0') {
+      status = 'duplicate signal'; 
+    }              
+            
+    const s = new SignalModel();
+    s.broker = params.broker as string;
+    s.message = '' as string;
+    s.signalChannel = params.signalChannel as string;
+    s.foreignId = 0 as number;
+    s.buySell = params.buySell as string;
+    s.entryPrice = params.entryPrice as number;        
+    s.symbol = params.symbol as string;
+    s.stopLoss = params.stopLoss as number;
+    s.tp1 = params.tp1 as number;
+    s.tp2 = params.tp2 as number;
+    s.tp3 = params.tp3 as number;
+    s.tp4 = params.tp4 as number;  
+    s.tp5 = params.tp5 as number;   
+    s.status = status;    
+    s.markPriceOpen = markPrice;
+    const sResult = await __(manager.save(s));    
+
+    if (status == 'open') {
+      await __(this.binanceOpenSignal(params, markPrice, sResult, manager));
+      console.log('here we should open a position');
+    }    
+    return sResult;
+     
+    
+  }
+
+  @Post()  
+  @ReadOnly(false)
   @Authentication(true) 
   @Log(false) 
   async checkSignals(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
@@ -120,7 +174,7 @@ class Signal extends Controller {
               traderSignal.status = res.status;
               const sResult = await __(manager.save(traderSignal));
               if (res.status == 'FILLED') {              
-                await this.applyStrategy(traderSignal, symbol, signal, res, binance, manager);
+                await this.applyStrategyPost(traderSignal, symbol, signal, res, binance, manager);
               }
             }
           }
@@ -176,58 +230,79 @@ class Signal extends Controller {
 
   }
 
-  async getBalance(binance: any): Promise<number>{    
-    const response = await binance.futuresBalance();
-    console.log(response);
-    console.log('response', response);
-    let balanceUsdt = 0;
+  async getBalance(broker: string, binance: any): Promise<any>{    
+    let response;
+    if (broker == 'binance_futures') {
+      response = await binance.futuresBalance();   
+    } else if (broker == 'binance_spot'){
+      response = await binance.balance();  
+    }
+     
+    let balanceUsdt = {};
     response.forEach((account:any) => {
       if (account.asset == 'USDT') {
-        balanceUsdt = account.balance;
+        balanceUsdt = account;
       }
     });   
-    return balanceUsdt as number;
+    return balanceUsdt;
   }
 
   async binanceOpenSignal(message: Record<string, unknown>, markPrice: number, signal: SignalModel, manager: EntityManager): Promise<number>{
-    const  traders = await __(TraderModel.find({
-      status: 'active'
+    const  tradersChannel = await __(TraderChannel.find({
+      status: 'active',
+      channel: signal.signalChannel,
+      broker: signal.broker
     }));         
     const  symbol = await __(SymbolModel.findOne({
       code: message.symbol as string
     }));  
-    for (const trader of traders) {      
+    for (const traderChannel of tradersChannel) {      
 
-      const binance = this.initBinance(trader);      
-      const balance = await this.getBalance(binance);
-      if (balance > 0) {
-        const leverage = 6;/*(message.leverage as string).substring(0,2)*/
-        const usdtToSpend = balance * 0.15 * leverage;        
+      const binance = this.initBinance(traderChannel.trader);      
+      const balance = await this.getBalance(traderChannel.broker, binance);
+      const tradeAmount = traderChannel.trader.amountToTrade == 0 ? balance.balance * traderChannel.trader.percentageToTrade / 100 : traderChannel.trader.amountToTrade;
+      let orderId = 'BALANCE';
+      let quantity = 0;
+      if (balance.availableBalance > tradeAmount) {        
+        const usdtToSpend = tradeAmount * traderChannel.trader.leverage;        
         const exponent = Math.pow(10, symbol.quantityPrecision)
-        const quantity = Math.round(usdtToSpend / (message.entryPrice as number) * exponent) / exponent;
+        quantity = Math.round(usdtToSpend / (message.entryPrice as number) * exponent) / exponent;
         const d = new Date();
         const ts = d.getTime();  
           
-        
-        console.info( await binance.futuresLeverage( message.symbol, leverage) );
-        console.info( await binance.futuresMarginType( message.symbol, 'ISOLATED' ) );
-        let res;
-        if (message.buySell == 'BUY') {
-          res = await binance.futuresMarketBuy( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
-        } else {
-          res = await binance.futuresMarketSell( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
+        if (traderChannel.broker == 'binance_futures') {
+          console.info( await binance.futuresLeverage( message.symbol, traderChannel.trader.leverage) );
+          console.info( await binance.futuresMarginType( message.symbol, traderChannel.trader.marginMode ) );
         }
-        console.log(message.symbol, quantity, message.entryPrice);
-        console.log(res);
-        const td = new TraderSignal();
-        td.signal = signal;
-        td.trader = trader;
-        td.brokerId = res.orderId;
-        td.status = quantity == 0 ? 'LOW_QUANTITY' : 'PENDING';
-        td.strategy = trader.strategy;   
-        const sResult = await __(manager.save(td));           
+        
+        let res;
+        if (quantity > 0) {
+          res = await this.applyStrategyPre(traderChannel, message, quantity, binance, manager); 
+          if (res.orderId) {
+            orderId = res.orderId;  
+          } else {
+            orderId = 'ERROR';
+          }  
+        }     
        
-      }   
+      }
+      let status = '';
+      if (orderId == 'BALANCE') {
+        status = 'NO_BALANCE';
+      } else if (orderId == 'ERROR') {
+        status = 'ERROR';
+      } else if (quantity == 0) {
+        status = 'LOW_QUANTITY';
+      } else {
+        status = 'PENDING';
+      }
+      const td = new TraderSignal();
+        td.signal = signal;
+        td.trader = traderChannel.trader;
+        td.brokerId = orderId;
+        td.status = status;
+        td.strategy = traderChannel.strategy;   
+        const sResult = await __(manager.save(td));   
     }  
     return 1;
   }  
@@ -402,9 +477,21 @@ class Signal extends Controller {
     
     return status;
   }
-  async applyStrategy(trader: TraderModel, symbol: SymbolModel , signal: SignalModel, order: any, binance: any,  manager: EntityManager): Promise<string>{    
+  async applyStrategyPost(trader: TraderSignal, symbol: SymbolModel , signal: SignalModel, order: any, binance: any,  manager: EntityManager): Promise<string>{    
     // E1 creates a trailing stop loss between tp1 and tp2
-    if (trader.strategy == 'E1') {
+    if (trader.strategy == 'kplian_fut_1') {
+      let res;
+      
+      if (signal.buySell == 'BUY') {
+        console.log('before', symbol);
+        const activatePrice = this.myRound(signal.entryPrice * 1.01, symbol.pricePrecision);
+        res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true});
+        
+      } else {
+        const activatePrice = this.myRound(signal.entryPrice * 0.99, symbol.pricePrecision);
+        res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true});
+      }      
+    } else if (trader.strategy == 'easy_fut_1') {
       let res;
       
       if (signal.buySell == 'BUY') {
@@ -418,6 +505,27 @@ class Signal extends Controller {
       }      
     }
     return 'exito'; 
+  }
+
+  async applyStrategyPre(trader: TraderChannel, message: Record<string, unknown>, quantity:number, binance: any,  manager: EntityManager): Promise<any>{       
+    
+    let res = {};
+    // E1 create a market stop without sl and tf
+    if (trader.strategy == 'easy_fut_1') {
+      if (message.buySell == 'BUY') {
+        res = await binance.futuresMarketBuy( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
+      } else {
+        res = await binance.futuresMarketSell( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
+      }      
+    } else if (trader.strategy == 'kplian_fut_1') {     
+      
+      if (message.buySell == 'BUY') {
+        res = await binance.futuresMarketBuy( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
+      } else {
+        res = await binance.futuresMarketSell( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
+      }      
+    }
+    return res; 
   }
   myRound(x:number, decimals: number) : number {
     console.log('decimals', decimals);

@@ -14,6 +14,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { PxpEntity } from '../../../lib/pxp';
 import TraderSignal from './TraderSignal';
+import TraderChannel from './TraderChannel';
 
 @Entity({ name: 'tbin_trader' })
 export default class Trader extends PxpEntity {
@@ -35,14 +36,27 @@ export default class Trader extends PxpEntity {
   // binance_spot, binance_futures
   @Column({ name: 'test_api_secret', type: 'varchar', nullable: true })
   testApiSecret: string;
-
-  @Column({ name: 'strategy', type: 'varchar', length: 50, nullable: false })
-  strategy: string; 
-
+ 
   @Column({ name: 'status', type: 'varchar', length: 50, nullable: true })
-  status: string; 
+  status: string;
+  
+  @Column({ name: 'percentage_to_trade', type: 'numeric', nullable: true })
+  percentageToTrade: number;
+
+  @Column({ name: 'amount_to_trade', type: 'numeric', nullable: true })
+  amountToTrade: number;
+
+  @Column({ name: 'leverage', type: 'numeric', nullable: true })
+  leverage: number;
+
+  @Column({ name: 'margin_mode', type: 'varchar',length: 50, nullable: true })
+  marginMode: string;
+
 
   @OneToMany(() => TraderSignal, traderSignal => traderSignal.trader)
   traderSignals: TraderSignal[];
+
+  @OneToMany(() => TraderChannel, traderSignal => traderSignal.trader)
+  traderChannels: TraderChannel[];
   
 }
