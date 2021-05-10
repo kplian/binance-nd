@@ -8,7 +8,6 @@
  ***************************************************************************/
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
 import { PxpEntity } from '../../../lib/pxp';
-import TraderSignal from './TraderSignal';
 
 @Entity({ name: 'tbin_alert' })
 export default class Alert extends PxpEntity {

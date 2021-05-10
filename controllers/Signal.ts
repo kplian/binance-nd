@@ -23,10 +23,10 @@ import TraderChannel from '../entity/TraderChannel';
 const Binance = require('node-binance-api');
 
 
-@Model('binance-nd/Signal')
+@Model('binance/Signal')
 
 class Signal extends Controller {
-  /*@Post()
+  @Post()
   @ReadOnly(false)
   @Authentication(true)
   @Log(false)
@@ -88,7 +88,7 @@ class Signal extends Controller {
     }
     return {...existing, ...{ new: false }};
 
-  }*/
+  }
 
   @Post()
   @ReadOnly(false)
