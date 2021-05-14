@@ -180,6 +180,8 @@ class Signal extends Controller {
             }
           }
 
+        } else {
+          completed++;
         }
 
       }
@@ -504,6 +506,17 @@ class Signal extends Controller {
         const activatePrice = this.myRound(((signal.tp1 - signal.tp2) / 2) + Number(signal.tp2), symbol.pricePrecision);
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true});
       }
+    } else if (trader.strategy == 'kplian_fut_2') {
+      let res;
+
+      if (signal.buySell == 'BUY') {        
+        const activatePrice = this.myRound(signal.entryPrice * 1.01, symbol.pricePrecision);
+        res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true, reduceOnly: true});
+
+      } else {
+        const activatePrice = this.myRound(signal.entryPrice * 0.99, symbol.pricePrecision);
+        res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
+      }
     }
     return 'exito';
   }
@@ -518,7 +531,7 @@ class Signal extends Controller {
       } else {
         res = await binance.futuresMarketSell( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
       }
-    } else if (trader.strategy == 'kplian_fut_1') {
+    } else if (trader.strategy == 'kplian_fut_1' || trader.strategy == 'kplian_fut_2') {
 
       if (message.buySell == 'BUY') {
         res = await binance.futuresMarketBuy( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});

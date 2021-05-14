@@ -70,16 +70,26 @@ scriptsArray.push({
     uiAccountType.order = 1;
     uiAccountType.parentId = uiMainMenuMM.uiId;
     await em.save(uiAccountType);
-
-
-
   }
 });
 
+scriptsArray.push({
+  scriptCode: 'RCM-BIN-20210512-001', scriptFunction: async (em) => {
 
+    const subsystem = await Subsystem.findOne({ code: "BIN" });
+    const rootUi = await Ui.findOne({ code: "BIN_MENU" });
+
+    const uiMenu = new Ui();
+    uiMenu.code = 'BIN_ALERT';
+    uiMenu.name = 'Alert';
+    uiMenu.description = 'Alerts';
+    uiMenu.subsystem = subsystem as Subsystem;
+    uiMenu.route = 'BIN_ALERT';
+    uiMenu.createdBy = 'admin';
+    uiMenu.order = 1;
+    uiMenu.parentId = rootUi ? rootUi.uiId : 0 ;
+    await em.save(uiMenu);
+  }
+});
 
 export default scriptsArray;
-
-
-
-
