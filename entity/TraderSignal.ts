@@ -31,6 +31,24 @@ export default class TraderSignal extends PxpEntity {
   @Column({ name: 'broker_id', type: 'varchar', length: 100, nullable: true })
   brokerId: string;
 
+  @Column({ name: 'broker_id2', type: 'varchar', length: 100, nullable: true })
+  brokerId2: string;
+
+  @Column({ name: 'broker_id3', type: 'varchar', length: 100, nullable: true })
+  brokerId3: string;
+
+  @Column({ name: 'broker_id4', type: 'varchar', length: 100, nullable: true })
+  brokerId4: string;
+
+  @Column({ name: 'status2', type: 'varchar', length: 50, nullable: true })
+  status2: string; 
+
+  @Column({ name: 'status3', type: 'varchar', length: 50, nullable: true })
+  status3: string; 
+
+  @Column({ name: 'status4', type: 'varchar', length: 50, nullable: true })
+  status4: string; 
+
   @ManyToOne(() => Signal, signal => signal.traderSignals)
   @JoinColumn({ name: 'signal_id' })
   signal: Signal;

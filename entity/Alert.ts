@@ -88,4 +88,24 @@ export default class Alert extends PxpEntity {
     @Column({ name: 'market_price', type: 'numeric', nullable: true })
     marketPrice: number;
 
+    @Column({ name: 'signal_type', type: 'varchar', length: 10, nullable: true })
+    signalType: string;
+
+    @Column({ name: 'trend', type: 'varchar', length: 10, nullable: true })
+    trend: string;
+
+    @Column({ name: 'tracing', type: 'numeric', nullable: true })
+    tracing: number;
+
+    @Column({ name: 'is_touching', type: 'varchar', length: 2, nullable: true })
+    isTouching: string;
+
+    @Column({ name: 'action', type: 'varchar', length: 20, nullable: true })
+    action: string;
+
+    @Column({ name: 'action_previous_price', type: 'numeric', nullable: true })
+    actionPreviousPrice: number;
+
+    @Column({ name: 'pnl_percentage', type: 'numeric', nullable: true })
+    pnlPercentage: number;
 }

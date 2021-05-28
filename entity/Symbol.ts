@@ -28,5 +28,8 @@ export default class Symbol extends PxpEntity {
 
   @Column({ name: 'price_precision', type: 'numeric', nullable: true})
   pricePrecision: number;  
+
+  @Column({ name: 'auto_trade', type: 'varchar', nullable: true})
+  autoTrade: string; 
   
 }

@@ -53,7 +53,7 @@ class Signal extends Controller {
         //check duplicates
         const duplicatesCount = await manager.query(` SELECT count(*)
                                                       FROM tbin_signal
-                                                      WHERE symbol = '${messageRead.symbol}' and created_at + interval '3 hours' > now() and status in ('open', 'closed')`);
+                                                      WHERE symbol = '${messageRead.symbol}' and status in ('open', 'filled')`);
 
         if (duplicatesCount[0].count != '0') {
           status = 'duplicate';
@@ -110,7 +110,7 @@ class Signal extends Controller {
     //check duplicates
     const duplicatesCount = await manager.query(` SELECT count(*) 
                                                   FROM tbin_signal 
-                                                  WHERE symbol = '${params.symbol}' and created_at + interval '3 hours' > now() and status in ('open', 'closed')`);
+                                                  WHERE symbol = '${params.symbol}' and status in ('open', 'filled')`);
 
     if (duplicatesCount[0].count != '0') {
       status = 'duplicate signal';
@@ -122,7 +122,7 @@ class Signal extends Controller {
     s.signalChannel = params.signalChannel as string;
     s.foreignId = 0 as number;
     s.buySell = params.buySell as string;
-    s.entryPrice = params.entryPrice as number;
+    s.entryPrice = (params.entryPrice || markPrice) as number;
     s.symbol = params.symbol as string;
     s.stopLoss = params.stopLoss as number;
     s.tp1 = params.tp1 as number;
@@ -152,44 +152,95 @@ class Signal extends Controller {
     const  openSignals = await __(SignalModel.find({
       status:In(["open"])
     }));
-
+    /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
-
-      const markPrice = await __(this.binanceGetMarkPrice(signal.symbol as string));
-
+      
       const  symbol = await __(SymbolModel.findOne({
         code: signal.symbol
       }));
-      let completed = 0;
-      for (const traderSignal of signal.traderSignals) {
+      
+       
+      for (const traderSignal of signal.traderSignals) {       
         if (traderSignal.status == 'PENDING') {
           if (!traderSignal.brokerId) {
             traderSignal.status = 'ERROR';
-            const sResult = await __(manager.save(traderSignal));
+            const sResult = await __(manager.save(traderSignal));            
           } else {
             const binance = this.initBinance(traderSignal.trader);
             const res = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId} );
 
-            if (['CANCELED', 'FILLED', 'EXPIRED'].includes(res.status)) {
-              completed++;
+            if (['CANCELED', 'FILLED', 'EXPIRED'].includes(res.status)) {              
               traderSignal.status = res.status;
-              const sResult = await __(manager.save(traderSignal));
+              await __(manager.save(traderSignal));
               if (res.status == 'FILLED') {
-                await this.applyStrategyPost(traderSignal, symbol, signal, res, binance, manager);
+                const resStrategy = await this.applyStrategyPost(traderSignal, symbol, signal, res, binance, manager);                
+                if (resStrategy.orderId) {
+                  traderSignal.brokerId2 = resStrategy.orderId;
+                  traderSignal.status2 = 'PENDING';
+                } else {
+                  traderSignal.status2 = 'ERROR';
+                }
+                await __(manager.save(traderSignal));
               }
             }
           }
 
-        } else {
-          completed++;
+        }
+      }
+      await this.checkSignalStatus(signal, 'filled', manager);
+    }
+      
+    /*UPDATE ALL DEPENDENT STATUS*/
+    const  filledSignals = await __(SignalModel.find({
+      status:In(["filled"])
+    }));
+
+    for (const signal of filledSignals) {
+      for (const traderSignal of signal.traderSignals) {
+        const binance = this.initBinance(traderSignal.trader);
+        if (traderSignal.status2 == 'PENDING') {
+          const res = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId2} );
+          if (['CANCELED', 'FILLED', 'EXPIRED'].includes(res.status)) {              
+            traderSignal.status2 = res.status;
+            await __(manager.save(traderSignal));
+          }
+        }
+        if (traderSignal.status3 == 'PENDING') {
+          const res = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId3} );
+          if (['CANCELED', 'FILLED', 'EXPIRED'].includes(res.status)) {              
+            traderSignal.status3 = res.status;
+            await __(manager.save(traderSignal));
+          }
+        }
+        if (traderSignal.status4 == 'PENDING') {
+          const res = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId4} );
+          if (['CANCELED', 'FILLED', 'EXPIRED'].includes(res.status)) {              
+            traderSignal.status4 = res.status;
+            await __(manager.save(traderSignal));
+          }
         }
 
+        if (traderSignal.status2 == 'FILLED' || traderSignal.status3 == 'FILLED' || traderSignal.status4 == 'FILLED') {
+          
+          if (traderSignal.status2 == 'PENDING') {
+            const res = await binance.futuresCancel( signal.symbol, {orderId: traderSignal.brokerId2} );
+          }
+          if (traderSignal.status3 == 'PENDING') {
+            const res = await binance.futuresCancel( signal.symbol, {orderId: traderSignal.brokerId3} );
+          }
+          if (traderSignal.status4 == 'PENDING') {
+            const res = await binance.futuresCancel( signal.symbol, {orderId: traderSignal.brokerId4} );
+          }
+          traderSignal.status2 = traderSignal.status2 == 'PENDING' ? 'CANCELED' : traderSignal.status2;
+          traderSignal.status3 = traderSignal.status3 == 'PENDING' ? 'CANCELED' : traderSignal.status3;
+          traderSignal.status4 = traderSignal.status4 == 'PENDING' ? 'CANCELED' : traderSignal.status4;
+          await __(manager.save(traderSignal));
+        }
       }
-      if (completed == signal.traderSignals.length) {
-        signal.status = 'closed'
-        const sResult = await __(manager.save(signal));
-      }
+      await this.checkSignalStatus(signal, 'closed', manager);
     }
+      
+    
     return {message: 'success'};
 
   }
@@ -205,6 +256,30 @@ class Signal extends Controller {
 
 
     return response.data.markPrice;
+
+  }
+
+  async checkSignalStatus(signal: SignalModel, type:string, manager: EntityManager): Promise<string>{
+    let query = '';
+    if (type == 'filled') {
+      query = `
+        select count(*) 
+        from tbin_trader_signal 
+        where signal_id = ${signal.signalId} and status = 'PENDING'`;
+    } else {
+      query = `
+      select count(*) 
+      from tbin_trader_signal 
+      where signal_id = ${signal.signalId} and (status2 = 'PENDING' or status3 = 'PENDING' or status4 = 'PENDING')`;
+    }
+    const resQuery = await getManager().query(query);
+
+    if (resQuery[0]['count'] == '0'){
+      signal.status = type;
+      await __(manager.save(signal));
+
+    }
+    return 'exito';
 
   }
 
@@ -240,7 +315,7 @@ class Signal extends Controller {
     } else if (broker == 'binance_spot'){
       response = await binance.balance();
     }
-
+    console.log(response);
     let balanceUsdt = {};
     response.forEach((account:any) => {
       if (account.asset == 'USDT') {
@@ -264,12 +339,13 @@ class Signal extends Controller {
       const binance = this.initBinance(traderChannel.trader);
       const balance = await this.getBalance(traderChannel.broker, binance);
       const tradeAmount = traderChannel.trader.amountToTrade == 0 ? balance.balance * traderChannel.trader.percentageToTrade / 100 : traderChannel.trader.amountToTrade;
+      console.log('gtradeamount', tradeAmount);
       let orderId = 'BALANCE';
       let quantity = 0;
       if (balance.availableBalance > tradeAmount) {
         const usdtToSpend = tradeAmount * traderChannel.trader.leverage;
         const exponent = Math.pow(10, symbol.quantityPrecision)
-        quantity = Math.round(usdtToSpend / (message.entryPrice as number) * exponent) / exponent;
+        quantity = Math.round(usdtToSpend / (signal.entryPrice as number) * exponent) / exponent;
         const d = new Date();
         const ts = d.getTime();
 
@@ -302,7 +378,9 @@ class Signal extends Controller {
       const td = new TraderSignal();
         td.signal = signal;
         td.trader = traderChannel.trader;
-        td.brokerId = orderId;
+        if (status == 'PENDING') {
+          td.brokerId = orderId;
+        }        
         td.status = status;
         td.strategy = traderChannel.strategy;
         const sResult = await __(manager.save(td));
@@ -480,10 +558,11 @@ class Signal extends Controller {
 
     return status;
   }
-  async applyStrategyPost(trader: TraderSignal, symbol: SymbolModel , signal: SignalModel, order: any, binance: any,  manager: EntityManager): Promise<string>{
+  async applyStrategyPost(trader: TraderSignal, symbol: SymbolModel , signal: SignalModel, order: any, binance: any,  manager: EntityManager): Promise<any>{
     // E1 creates a trailing stop loss between tp1 and tp2
+    let res;
     if (trader.strategy == 'kplian_fut_1') {
-      let res;
+      
 
       if (signal.buySell == 'BUY') {
         console.log('before', symbol);
@@ -495,8 +574,6 @@ class Signal extends Controller {
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true});
       }
     } else if (trader.strategy == 'easy_fut_1') {
-      let res;
-
       if (signal.buySell == 'BUY') {
         console.log('before', symbol);
         const activatePrice = this.myRound(((signal.tp2 - signal.tp1) / 2 as number) + Number(signal.tp1), symbol.pricePrecision);
@@ -507,8 +584,6 @@ class Signal extends Controller {
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true});
       }
     } else if (trader.strategy == 'kplian_fut_2') {
-      let res;
-
       if (signal.buySell == 'BUY') {        
         const activatePrice = this.myRound(signal.entryPrice * 1.01, symbol.pricePrecision);
         res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true, reduceOnly: true});
@@ -517,8 +592,17 @@ class Signal extends Controller {
         const activatePrice = this.myRound(signal.entryPrice * 0.99, symbol.pricePrecision);
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
       }
+    } else if (trader.strategy == 'kplian_fut_alert_1') {
+      if (signal.buySell == 'BUY') {        
+        const activatePrice = this.myRound(signal.entryPrice * 1.2, symbol.pricePrecision);
+        res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true, reduceOnly: true});
+
+      } else {
+        const activatePrice = this.myRound(signal.entryPrice * 0.8, symbol.pricePrecision);
+        res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
+      }
     }
-    return 'exito';
+    return res;
   }
 
   async applyStrategyPre(trader: TraderChannel, message: Record<string, unknown>, quantity:number, binance: any,  manager: EntityManager): Promise<any>{
@@ -538,8 +622,46 @@ class Signal extends Controller {
       } else {
         res = await binance.futuresMarketSell( message.symbol, quantity, {workingType: 'MARK_PRICE', type: 'STOP_MARKET', stopPrice: message.entryPrice});
       }
+    } else if (trader.strategy == 'kplian_fut_alert_1') {
+      if (message.buySell == 'BUY') {
+        res = await binance.futuresMarketBuy( message.symbol, quantity, {type: 'MARKET'});
+      } else {
+        res = await binance.futuresMarketSell( message.symbol, quantity, {type: 'MARKET'});
+      }
     }
     return res;
+  }
+
+  async closeSignal(symbol: string, action: string, manager: EntityManager): Promise<string> {
+
+    const  openSignals = await __(SignalModel.find({
+      status:In(["filled"]),
+      symbol: symbol
+    }));
+    let res:any;
+    /*LOOP FOR STATUS OPEN SIGNALS*/
+    for (const signal of openSignals) {
+      for (const traderSignal of signal.traderSignals) {  
+        if (traderSignal.status == 'FILLED') {
+          const binance = this.initBinance(traderSignal.trader);
+          const order = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId} );
+          if (action == 'stop_sell') {
+            res = await binance.futuresMarketBuy( symbol, order.executedQty, {type: 'MARKET',  reduceOnly: true});
+          } else if (action == 'stop_buy') {
+            res = await binance.futuresMarketSell( symbol, order.executedQty , {type: 'MARKET',  reduceOnly: true});
+          }
+          if (res.orderId) {
+            traderSignal.status3 = 'PENDING';
+            traderSignal.brokerId3 = res.orderId;
+          } else {
+            traderSignal.status3 = 'ERROR';
+          }
+          await manager.save(traderSignal);
+        }
+      }
+
+    }
+    return 'success';
   }
   myRound(x:number, decimals: number) : number {
     console.log('decimals', decimals);

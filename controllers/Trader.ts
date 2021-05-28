@@ -40,8 +40,33 @@ class Trader extends Controller {
     @Post()
     @ReadOnly(false)
     @Authentication(true)
-    async cancel(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+    async getOrders(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
 
+        const  trader = await __(TraderModel.findOne(params.traderId as number));
+        const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret: trader.apiSecret;
+        const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId: trader.apiId;
+        const binance = new Binance().options({
+            APIKEY: apiKey,
+            APISECRET: apiSecret,
+            test: process.env.NODE_ENV == 'development' ? true : false
+        });
+        const response = await binance.futuresOpenOrders();
+        return response;
+    }
+
+    @Post()
+    @ReadOnly(false)
+    @Authentication(true)
+    async cancel(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+        const  trader = await __(TraderModel.findOne(params.traderId as number));
+        const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret: trader.apiSecret;
+        const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId: trader.apiId;
+        const binance = new Binance().options({
+            APIKEY: apiKey,
+            APISECRET: apiSecret,
+            test: process.env.NODE_ENV == 'development' ? true : false
+        });
+        const response = await binance.futuresCancel( params.symbol, {orderId: params.orderId} )
         return { success: true }
     }
 }
