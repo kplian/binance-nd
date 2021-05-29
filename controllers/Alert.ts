@@ -115,7 +115,7 @@ class Alert extends Controller {
         }
 
         alert.action = 'nothing';        
-        if (alert.type == 'control' && alertPrev.is_touching == 'Y' && alert.isTouching == 'N' && alert.interval == '60') {
+        if (alert.type == 'control' && alertPrev && alertPrev.is_touching == 'Y' && alert.isTouching == 'N' && alert.interval == '60') {
             
             if (alert.low > alert.plot5) {
                 alert.action = 'buy';
