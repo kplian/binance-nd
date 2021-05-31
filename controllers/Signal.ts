@@ -20,6 +20,7 @@ import axios, { AxiosRequestConfig } from 'axios';
 import crypto from 'crypto';
 import TraderSignal from '../entity/TraderSignal';
 import TraderChannel from '../entity/TraderChannel';
+import { Common } from './../services/common';
 const Binance = require('node-binance-api');
 
 
@@ -246,16 +247,9 @@ class Signal extends Controller {
   }
 
   async binanceGetMarkPrice(symbol: string): Promise<number>{
-    const response = await __(axios.get(
-        process.env.BINANCE_URL + '/fapi/v1/premiumIndex?symbol=' +  symbol.replace('/', ''),
-        {
-            headers: {
-                'Content-Type': 'application/json'
-              }
-        }));
-
-
-    return response.data.markPrice;
+    let common = new Common();
+    const marketPrice= await common.binanceGetMarkPrice(symbol); 
+    return marketPrice;
 
   }
 

@@ -40,16 +40,15 @@ class Alert extends Controller {
         }
 
         //Find previous alert by coin and interval
-        const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time);
+        const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time, params.type);
 
-        const lastAction = await this.getLastAction(json.ticker);
+        const lastAction = await this.getLastAction(json.ticker, json.interval, params.type);
         
         //Get market price
         let common = new Common();
-        let marketPrice = json.price;
-        if ((params.type == 'control' && json.interval == '60') || params.type != 'control') {
-            marketPrice= await common.binanceGetMarkPrice(json.ticker.replace('PERP', ''));
-        }
+        let marketPrice = json.price;        
+        marketPrice= await common.binanceGetMarkPrice(json.ticker.replace('PERP', ''));
+        
 
         //Save the alert        
         const alert = new AlertModel();
@@ -80,18 +79,79 @@ class Alert extends Controller {
         alert.interval = json.interval;
         alert.previousAlertIdFk = alertPrev ? alertPrev.alert_id : null;
         alert.marketPrice = marketPrice;
-        if (json.plot_1) {
+        let nalert: AlertModel;
+        if (params.type == 'MA 15min control') {
+            nalert = await this.atrh(alert, alertPrev, lastAction, manager);
+        } else {
+            nalert = await this.atrh(alert, alertPrev, lastAction, manager);
+        }       
+
+        //Response
+        return alert;
+    }
+
+    @Post()
+    @ReadOnly(false)
+    @Authentication(false)
+    async test(params: any, manager: EntityManager): Promise<any> {
+        console.log('test binance', params);
+        let json = params;
+        if(json.bodyText) {
+            console.log('body body',json.bodyText);
+            //let re = /\\":\\;
+            const parse = json.bodyText.split('\\n',100);
+            let re = new RegExp("\d\\d");
+            parse.map((pos: any) => {
+                console.log('pos', pos)
+                return pos.replace(re, "");
+            });
+            console.log('FIN', parse);
+            json = JSON.parse(json.bodyText)
+        }
+
+        return json;
+    }
+
+    async getLastAlert(coin: any, interval: any, time: string, type: string):Promise<any> {
+        const resQuery = await getManager().query(`
+            select * 
+            from tbin_alert ta 
+            where ta.interval = '${interval}' and ta.type='${type}' and ta.ticker  = '${coin}'  and left(ta.timenow, 16) = left('${time}', 16)            
+            order by ta.alert_id desc
+            limit 1 offset 0 `);
+        if (resQuery.length > 0) {
+            return resQuery[0];
+        }
+        return null;        
+    }
+
+    async getLastAction(coin: any, interval: any, type: string):Promise<any> {
+        const resQuery = await getManager().query(`
+            select * 
+            from tbin_alert a 
+            where a.ticker = '${coin}' and a.action in ('sell', 'buy', 'stop_sell', 'stop_buy') 
+                and ((a.type = '${type}' or a.type = 'close' ) and a.interval = '${interval}')
+            order by a.alert_id desc limit 1`);
+        if (resQuery.length > 0) {
+            return resQuery[0];
+        }
+        return null;        
+    }
+
+    async atrh (alert: AlertModel, alertPrev:any, lastAction: any, manager: EntityManager):Promise<AlertModel> {
+        let res: AlertModel;
+        if (alert.plot1) {
             alert.signalType = 'long';
         }
 
-        if (json.plot_3) {
+        if (alert.plot3) {
             alert.signalType = 'short';
         }
 
-        if (json.plot_5 && json.plot_6) {
-            if (json.plot_5 > json.plot_6) {
+        if (alert.plot5 && alert.plot6) {
+            if (alert.plot5 > alert.plot6) {
                 alert.trend = 'green';
-            } else if ( json.plot_6 > json.plot_5) {
+            } else if ( alert.plot6 > alert.plot5) {
                 alert.trend = 'red';
             }
         }
@@ -108,9 +168,9 @@ class Alert extends Controller {
             }
     	}
 
-        if (json.plot_4 && alertPrev) {
+        if (alert.plot4 && alertPrev) {
             if (alertPrev.plot_4) {
-                alert.tracing = json.plot_4 / alertPrev.plot_4 * 100;
+                alert.tracing = alert.plot4 / alertPrev.plot_4 * 100;
             }            
         }
 
@@ -158,76 +218,72 @@ class Alert extends Controller {
         }
 
         if (alert.action != 'nothing') {
-            const m = new Telegram('binance');
-            m.message({ message: `SYMBOL: ${alert.ticker}📈 \nACTION: ${alert.action} \nPRICE: ${alert.marketPrice} \nPREVIOUS PRICE: ${alert.actionPreviousPrice}` }, manager);    
-            const s = new Signal('binance');
-            if (alert.action == 'stop_sell' || alert.action == 'stop_buy') {
-                await s.closeSignal(alert.ticker.slice(0, -4), alert.action, manager);
-            } else {
-                const mySymbol = await Symbol.findOne({code: alert.ticker.slice(0, -4), autoTrade: 'Y'});
-                if (mySymbol) {
-                    await s.addForm({
-                        broker: "binance_futures",    
-                        signalChannel: "kplian_alert",
-                        buySell: alert.action == 'buy' ? "BUY" : 'SELL',                        
-                        symbol: alert.ticker.slice(0, -4)
-                    }, manager);
-                }                
-            }
+            await this.generateSignal('atrh60', alert, manager);
         }
         
-        await __(manager.save(alert));
+        res = await __(manager.save(alert));
+        return res;
 
-        //Response
-        return alert;
     }
 
-    @Post()
-    @ReadOnly(false)
-    @Authentication(false)
-    async test(params: any, manager: EntityManager): Promise<any> {
-        console.log('test binance', params);
-        let json = params;
-        if(json.bodyText) {
-            console.log('body body',json.bodyText);
-            //let re = /\\":\\;
-            const parse = json.bodyText.split('\\n',100);
-            let re = new RegExp("\d\\d");
-            parse.map((pos: any) => {
-                console.log('pos', pos)
-                return pos.replace(re, "");
-            });
-            console.log('FIN', parse);
-            json = JSON.parse(json.bodyText)
+    async ma15 (alert: AlertModel, alertPrev:any, lastAction: any, manager: EntityManager):Promise<AlertModel> {
+        let res: AlertModel;
+        if (alert.plot1 - alert.plot0 > 0) {
+            alert.signalType = 'short';
+            alert.trend = 'red';
+        } else {
+            alert.signalType = 'long';
+            alert.trend = 'green';
         }
+        alert.isTouching = 'N';  
 
-        return json;
+        alert.action = 'nothing';        
+        if (alertPrev && alertPrev.trend != alert.trend) {            
+            if (alert.trend == 'green') {
+                alert.action = 'stop_sell';
+                if (lastAction) {
+                    alert.actionPreviousPrice = lastAction.market_price;                	
+                    alert.pnlPercentage = (alert.marketPrice * 100 / alert.actionPreviousPrice) - 100;
+                }   
+                await this.generateSignal('ma15', alert, manager);
+                alert.action = 'buy';
+                await this.generateSignal('ma15', alert, manager);
+            } else {
+                alert.action = 'stop_buy';
+                if (lastAction) {
+                    alert.actionPreviousPrice = lastAction.market_price;                    
+                    alert.pnlPercentage = ((alert.marketPrice * 100 / alert.actionPreviousPrice) - 100) * -1;
+                }   
+                await this.generateSignal('ma15', alert, manager);
+                alert.action = 'sell';
+                await this.generateSignal('ma15', alert, manager);
+            }            
+        } 
+
+        res = await __(manager.save(alert));
+        return res;
+
     }
 
-    async getLastAlert(coin: any, interval: any, time: string):Promise<any> {
-        const resQuery = await getManager().query(`
-            select * 
-            from tbin_alert ta 
-            where ta.interval = '${interval}' and ta.type='control' and ta.ticker  = '${coin}'  and left(ta.timenow, 16) = left('${time}', 16)            
-            order by ta.alert_id desc
-            limit 1 offset 0 `);
-        if (resQuery.length > 0) {
-            return resQuery[0];
+    async generateSignal (type: string, alert: AlertModel, manager: EntityManager):Promise<string> {
+        const m = new Telegram('binance');
+        m.message({ message: `TYPE: ${type}📈 \nSYMBOL: ${alert.ticker}📈 \nACTION: ${alert.action} \nPRICE: ${alert.marketPrice} \nPREVIOUS PRICE: ${alert.actionPreviousPrice}` }, manager);    
+        const s = new Signal('binance');
+        if (alert.action == 'stop_sell' || alert.action == 'stop_buy') {
+            await s.closeSignal(alert.ticker.slice(0, -4), alert.action, manager);
+        } else {
+            const mySymbol = await Symbol.findOne({code: alert.ticker.slice(0, -4), autoTrade: 'Y'});
+            if (mySymbol) {
+                await s.addForm({
+                    broker: "binance_futures",    
+                    signalChannel: "kplian_alert",
+                    buySell: alert.action == 'buy' ? "BUY" : 'SELL',                        
+                    symbol: alert.ticker.slice(0, -4)
+                }, manager);
+            }                
         }
-        return null;        
-    }
 
-    async getLastAction(coin: any):Promise<any> {
-        const resQuery = await getManager().query(`
-            select * 
-            from tbin_alert a 
-            where a.ticker = '${coin}' and a.action in ('sell', 'buy', 'stop_sell', 'stop_buy') 
-                and ((a.type = 'control' and a.interval = '60') or a.type != 'control')
-            order by a.alert_id desc limit 1`);
-        if (resQuery.length > 0) {
-            return resQuery[0];
-        }
-        return null;        
+        return 'success';
     }
 
     async getLastTouching(coin: any):Promise<any> {
@@ -285,7 +341,7 @@ class Alert extends Controller {
         })
 
         return 'done';
-
+        /*
         //Get/set json from request
         let json = params;
         if(params.bodyText) {
@@ -294,7 +350,7 @@ class Alert extends Controller {
         }
 
         //Find previous alert by coin and interval
-        const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time);
+        //const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time);
 
         //Get market price
         let common = new Common();
@@ -328,12 +384,12 @@ class Alert extends Controller {
         alert.plot5 = json.plot_5;
         alert.plot6 = json.plot_6;
         alert.interval = json.interval;
-        alert.previousAlertIdFk = alertPrev.alertId;
+        //alert.previousAlertIdFk = alertPrev.alertId;
         alert.marketPrice = marketPrice;
         await __(manager.save(alert));
 
         //Response
-        return alert;
+        return alert;*/
     }
 
 }

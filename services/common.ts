@@ -9,7 +9,8 @@ export class Common {
             {
                 headers: {
                     'Content-Type': 'application/json'
-                }
+                },
+                timeout: 2000
             }).catch((error) => {
             console.log(error)
         }));

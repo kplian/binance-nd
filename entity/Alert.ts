@@ -15,7 +15,7 @@ export default class Alert extends PxpEntity {
     @PrimaryGeneratedColumn({ name: 'alert_id' })
     alertId: number;
 
-    @Column({ name: 'type', type: 'varchar', length: 15, nullable: true })
+    @Column({ name: 'type', type: 'varchar', length: 30, nullable: true })
     type: string;
 
     @Column({ name: 'content', type: 'text', nullable: true })
