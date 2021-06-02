@@ -588,11 +588,11 @@ class Signal extends Controller {
       }
     } else if (trader.strategy == 'kplian_fut_alert_1') {
       if (signal.buySell == 'BUY') {        
-        const activatePrice = this.myRound(signal.entryPrice * 1.2, symbol.pricePrecision);
+        const activatePrice = this.myRound(signal.entryPrice * 1.015, symbol.pricePrecision);
         res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true, reduceOnly: true});
 
       } else {
-        const activatePrice = this.myRound(signal.entryPrice * 0.8, symbol.pricePrecision);
+        const activatePrice = this.myRound(signal.entryPrice * 0.985, symbol.pricePrecision);
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
       }
     }
@@ -650,9 +650,13 @@ class Signal extends Controller {
           } else {
             traderSignal.status3 = 'ERROR';
           }
+          await binance.futuresCancelAll( signal.symbol );
           await manager.save(traderSignal);
         }
       }
+      signal.status = 'closed';
+      await manager.save(signal);
+
 
     }
     return 'success';

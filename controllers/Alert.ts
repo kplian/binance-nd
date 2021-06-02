@@ -81,7 +81,7 @@ class Alert extends Controller {
         alert.marketPrice = marketPrice;
         let nalert: AlertModel;
         if (params.type == 'MA 15min control') {
-            nalert = await this.atrh(alert, alertPrev, lastAction, manager);
+            nalert = await this.ma15(alert, alertPrev, lastAction, manager);
         } else {
             nalert = await this.atrh(alert, alertPrev, lastAction, manager);
         }       
@@ -227,6 +227,7 @@ class Alert extends Controller {
     }
 
     async ma15 (alert: AlertModel, alertPrev:any, lastAction: any, manager: EntityManager):Promise<AlertModel> {
+        console.log ('MA15');
         let res: AlertModel;
         if (alert.plot1 - alert.plot0 > 0) {
             alert.signalType = 'short';
@@ -258,7 +259,25 @@ class Alert extends Controller {
                 alert.action = 'sell';
                 await this.generateSignal('ma15', alert, manager);
             }            
-        } 
+        } else if (lastAction && lastAction.trend != alert.trend) {
+            if (lastAction.action == 'buy') {
+                alert.action = 'stop_buy';
+                await this.generateSignal('ma15', alert, manager);
+            } else {
+                alert.action = 'stop_sell';
+                await this.generateSignal('ma15', alert, manager);
+            }
+            
+
+        } /*else if (lastAction && Math.abs(alert.plot0 - alert.plot1 )/alert.marketPrice *100 > 1.33) {
+            if (lastAction.action == 'buy' && (alert.plot0 - alert.plot1)/alert.marketPrice *100  > 1.33) {
+                alert.action = 'stop_buy';
+                await this.generateSignal('ma15', alert, manager);
+            } else if(lastAction.action = 'sell' && (alert.plot1 - alert.plot0)/alert.marketPrice * 100 > 1.33) {
+                alert.action = 'stop_sell';
+                await this.generateSignal('ma15', alert, manager);
+            }
+        }*/
 
         res = await __(manager.save(alert));
         return res;
