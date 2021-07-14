@@ -49,6 +49,9 @@ export default class TraderSignal extends PxpEntity {
   @Column({ name: 'status4', type: 'varchar', length: 50, nullable: true })
   status4: string; 
 
+  @Column({ name: 'real_time_date', type: 'timestamp', nullable: true, default: () => 'clock_timestamp()'})
+  realTimeDate: Date; 
+
   @ManyToOne(() => Signal, signal => signal.traderSignals)
   @JoinColumn({ name: 'signal_id' })
   signal: Signal;

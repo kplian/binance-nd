@@ -108,4 +108,7 @@ export default class Alert extends PxpEntity {
 
     @Column({ name: 'pnl_percentage', type: 'numeric', nullable: true })
     pnlPercentage: number;
+
+    @Column({ name: 'real_time_date', type: 'timestamp', nullable: true, default: () => 'clock_timestamp()'})
+    realTimeDate: Date; 
 }

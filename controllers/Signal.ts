@@ -100,11 +100,14 @@ class Signal extends Controller {
     let status = 'not_identified';
     if (params.symbol) {
         status = 'open';
-        markPrice = await __(this.binanceGetMarkPrice(params.symbol as string));
+        markPrice = params.marketPrice ? params.marketPrice : await __(this.binanceGetMarkPrice(params.symbol as string));
         status = this.validateData(params, markPrice);
+        if (params.status && status == 'open') {
+          status = params.status as string;
+        }
     }
 
-    if (status != 'open') {
+    if (status != 'open' && status != 'filled') {
       throw new PxpError(400, 'this error happened:' + status);
     }
 
@@ -135,7 +138,7 @@ class Signal extends Controller {
     s.markPriceOpen = markPrice;
     const sResult = await __(manager.save(s));
 
-    if (status == 'open') {
+    if (status == 'open' || status == 'filled') {
       await __(this.binanceOpenSignal(params, markPrice, sResult, manager));
       console.log('here we should open a position');
     }
@@ -336,7 +339,7 @@ class Signal extends Controller {
       console.log('gtradeamount', tradeAmount);
       let orderId = 'BALANCE';
       let quantity = 0;
-      if (balance.availableBalance > tradeAmount) {
+      if (balance.availableBalance > tradeAmount && (tradeAmount * traderChannel.trader.leverage) > 5) {
         const usdtToSpend = tradeAmount * traderChannel.trader.leverage;
         const exponent = Math.pow(10, symbol.quantityPrecision)
         quantity = Math.round(usdtToSpend / (signal.entryPrice as number) * exponent) / exponent;
@@ -344,8 +347,8 @@ class Signal extends Controller {
         const ts = d.getTime();
 
         if (traderChannel.broker == 'binance_futures') {
-          console.info( await binance.futuresLeverage( message.symbol, traderChannel.trader.leverage) );
-          console.info( await binance.futuresMarginType( message.symbol, traderChannel.trader.marginMode ) );
+          console.info( binance.futuresLeverage( message.symbol, traderChannel.trader.leverage) );
+          console.info( binance.futuresMarginType( message.symbol, traderChannel.trader.marginMode ) );
         }
 
         let res;
@@ -355,6 +358,7 @@ class Signal extends Controller {
             orderId = res.orderId;
           } else {
             orderId = 'ERROR';
+            console.log('ERROR OPENING SIGNAL:', res);
           }
         }
 
@@ -375,7 +379,7 @@ class Signal extends Controller {
         if (status == 'PENDING') {
           td.brokerId = orderId;
         }        
-        td.status = status;
+        td.status = 'FILLED';
         td.strategy = traderChannel.strategy;
         const sResult = await __(manager.save(td));
     }
@@ -586,7 +590,7 @@ class Signal extends Controller {
         const activatePrice = this.myRound(signal.entryPrice * 0.99, symbol.pricePrecision);
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
       }
-    } else if (trader.strategy == 'kplian_fut_alert_1') {
+    }/* else if (trader.strategy == 'kplian_fut_alert_1') {
       if (signal.buySell == 'BUY') {        
         const activatePrice = this.myRound(signal.entryPrice * 1.015, symbol.pricePrecision);
         res = await binance.futuresMarketSell( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true, reduceOnly: true});
@@ -595,7 +599,7 @@ class Signal extends Controller {
         const activatePrice = this.myRound(signal.entryPrice * 0.985, symbol.pricePrecision);
         res = await binance.futuresMarketBuy( signal.symbol, order.executedQty, {workingType: 'MARK_PRICE', type: 'TAKE_PROFIT_MARKET', stopPrice: activatePrice, priceProtect: true,  reduceOnly: true});
       }
-    }
+    }*/
     return res;
   }
 
@@ -636,21 +640,19 @@ class Signal extends Controller {
     /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
       for (const traderSignal of signal.traderSignals) {  
-        if (traderSignal.status == 'FILLED') {
+        if (traderSignal.status == 'FILLED' && traderSignal.brokerId) {
           const binance = this.initBinance(traderSignal.trader);
           const order = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId} );
           if (action == 'stop_sell') {
-            res = await binance.futuresMarketBuy( symbol, order.executedQty, {type: 'MARKET',  reduceOnly: true});
+            binance.futuresMarketBuy( symbol, order.executedQty, {type: 'MARKET',  reduceOnly: true});
           } else if (action == 'stop_buy') {
-            res = await binance.futuresMarketSell( symbol, order.executedQty , {type: 'MARKET',  reduceOnly: true});
+            binance.futuresMarketSell( symbol, order.executedQty , {type: 'MARKET',  reduceOnly: true});
           }
-          if (res.orderId) {
-            traderSignal.status3 = 'PENDING';
-            traderSignal.brokerId3 = res.orderId;
-          } else {
-            traderSignal.status3 = 'ERROR';
-          }
-          await binance.futuresCancelAll( signal.symbol );
+          
+          traderSignal.status3 = 'PENDING';
+          traderSignal.brokerId3 = 1;
+          
+          binance.futuresCancelAll( signal.symbol );
           await manager.save(traderSignal);
         }
       }

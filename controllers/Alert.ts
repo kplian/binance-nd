@@ -39,10 +39,17 @@ class Alert extends Controller {
             throw new PxpError(501, 'Alerts in string format is not yet implemented');
         }
 
-        //Find previous alert by coin and interval
-        const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time, params.type);
+        let type = params.type;
+        if (type == 'Str buy' || type == 'Str sell') {
+            type = "'Str sell','Str buy'";
+        } else {
+            type = `'${type}'`;
+        }
 
-        const lastAction = await this.getLastAction(json.ticker, json.interval, params.type);
+        //Find previous alert by coin and interval
+        const alertPrev = await this.getLastAlert(json.ticker, json.interval, json.time, type);
+        
+        const lastAction = await this.getLastAction(json.ticker, json.interval, type);
         
         //Get market price
         let common = new Common();
@@ -82,6 +89,10 @@ class Alert extends Controller {
         let nalert: AlertModel;
         if (params.type == 'MA 15min control') {
             nalert = await this.ma15(alert, alertPrev, lastAction, manager);
+        } else if (params.type == 'Str buy' || params.type == 'Str sell') {
+            nalert = await this.str(alert, alertPrev, lastAction, manager);
+        } else if (params.type == 'Boom') {
+            nalert = await this.boom(alert, alertPrev, lastAction, manager);
         } else {
             nalert = await this.atrh(alert, alertPrev, lastAction, manager);
         }       
@@ -116,7 +127,7 @@ class Alert extends Controller {
         const resQuery = await getManager().query(`
             select * 
             from tbin_alert ta 
-            where ta.interval = '${interval}' and ta.type='${type}' and ta.ticker  = '${coin}'  and left(ta.timenow, 16) = left('${time}', 16)            
+            where ta.interval = '${interval}' and ta.type in (${type}) and ta.ticker  = '${coin}'  and left(ta.timenow, 16) = left('${time}', 16)            
             order by ta.alert_id desc
             limit 1 offset 0 `);
         if (resQuery.length > 0) {
@@ -130,7 +141,7 @@ class Alert extends Controller {
             select * 
             from tbin_alert a 
             where a.ticker = '${coin}' and a.action in ('sell', 'buy', 'stop_sell', 'stop_buy') 
-                and ((a.type = '${type}' or a.type = 'close' ) and a.interval = '${interval}')
+                and ((a.type in (${type}) or a.type = 'close' ) and a.interval = '${interval}')
             order by a.alert_id desc limit 1`);
         if (resQuery.length > 0) {
             return resQuery[0];
@@ -284,6 +295,90 @@ class Alert extends Controller {
 
     }
 
+    async boom (alert: AlertModel, alertPrev:any, lastAction: any, manager: EntityManager):Promise<AlertModel> {
+        console.log ('boom');
+        let res: AlertModel;
+        if (alert.plot0 > 0  && alert.plot1 > 0  && alert.plot2 > 0) {
+            alert.signalType = 'long';
+            alert.trend = 'green';
+        } else if (alert.plot0 < 0  && alert.plot1 < 0  && alert.plot2 < 0) {
+            alert.signalType = 'short';
+            alert.trend = 'red';
+        } else {
+            alert.signalType = 'nothing';
+            alert.trend = 'nothing';
+        }
+        alert.isTouching = 'N';  
+
+        alert.action = 'nothing'; 
+               
+        if (alertPrev && alertPrev.trend != alert.trend) {            
+            if (alert.trend == 'green') { 
+                if (lastAction && lastAction.action == 'sell') {
+                    alert.action = 'stop_sell';
+                    alert.actionPreviousPrice = lastAction.market_price;  
+                    alert.pnlPercentage = ((alert.marketPrice * 100 / alert.actionPreviousPrice) - 100) * -1;  
+                    await this.generateSignal('Boom', alert, manager);
+                }
+                alert.action = 'buy';
+                await this.generateSignal('Boom', alert, manager);
+            } else if (alert.trend == 'red'){                
+                if (lastAction && lastAction.action == 'buy') {
+                    alert.action = 'stop_buy';
+                    alert.actionPreviousPrice = lastAction.market_price;                    
+                    alert.pnlPercentage = (alert.marketPrice * 100 / alert.actionPreviousPrice) - 100;
+                    await this.generateSignal('Boom', alert, manager);
+                } 
+                alert.action = 'sell';
+                await this.generateSignal('Boom', alert, manager);
+            } else {
+                if (lastAction && lastAction.action == 'buy') {
+                    alert.action = 'stop_buy';
+                    alert.actionPreviousPrice = lastAction.market_price;                    
+                    alert.pnlPercentage = (alert.marketPrice * 100 / alert.actionPreviousPrice) - 100;
+                    await this.generateSignal('Boom', alert, manager);
+                } else if (lastAction && lastAction.action == 'sell') {
+                    alert.action = 'stop_sell';
+                    alert.actionPreviousPrice = lastAction.market_price;                	
+                    alert.pnlPercentage = ((alert.marketPrice * 100 / alert.actionPreviousPrice) - 100) * -1; 
+                    await this.generateSignal('Boom', alert, manager);
+
+                }
+
+            }   
+
+        } 
+
+        res = await __(manager.save(alert));
+        return res;
+
+    }
+
+    async str (alert: AlertModel, alertPrev:any, lastAction: any, manager: EntityManager):Promise<AlertModel> {
+        let res: AlertModel;
+        if (alert.type == 'Str buy') { 
+            if (lastAction && lastAction.action == 'sell') {
+                alert.action = 'stop_sell';
+                alert.actionPreviousPrice = lastAction.price;  
+                alert.pnlPercentage = ((alert.price * 100 / alert.actionPreviousPrice) - 100) * -1;  
+                await this.generateSignal('Str', alert, manager);
+            }
+            alert.action = 'buy';
+            await this.generateSignal('Str', alert, manager);
+        } else if (alert.type == 'Str sell'){                
+            if (lastAction && lastAction.action == 'buy') {
+                alert.action = 'stop_buy';
+                alert.actionPreviousPrice = lastAction.price;                    
+                alert.pnlPercentage = (alert.price * 100 / alert.actionPreviousPrice) - 100;
+                await this.generateSignal('Str', alert, manager);
+            } 
+            alert.action = 'sell';
+            await this.generateSignal('Str', alert, manager);
+        }
+        res = await __(manager.save(alert));
+        return res;
+    }
+
     async generateSignal (type: string, alert: AlertModel, manager: EntityManager):Promise<string> {
         const m = new Telegram('binance');
         m.message({ message: `TYPE: ${type}📈 \nSYMBOL: ${alert.ticker}📈 \nACTION: ${alert.action} \nPRICE: ${alert.marketPrice} \nPREVIOUS PRICE: ${alert.actionPreviousPrice}` }, manager);    
@@ -294,7 +389,10 @@ class Alert extends Controller {
             const mySymbol = await Symbol.findOne({code: alert.ticker.slice(0, -4), autoTrade: 'Y'});
             if (mySymbol) {
                 await s.addForm({
-                    broker: "binance_futures",    
+                    broker: "binance_futures",   
+                    status: "filled",   
+                    marketPrice: alert.marketPrice,
+                    entryPrice: alert.price,
                     signalChannel: "kplian_alert",
                     buySell: alert.action == 'buy' ? "BUY" : 'SELL',                        
                     symbol: alert.ticker.slice(0, -4)

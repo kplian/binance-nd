@@ -69,6 +69,9 @@ export default class Signal extends PxpEntity {
   @Column({ name: 'mark_price_open', type: 'numeric', nullable: true })
   markPriceOpen: number;
 
+  @Column({ name: 'real_time_date', type: 'timestamp', nullable: true, default: () => 'clock_timestamp()'})
+  realTimeDate: Date; 
+
   @OneToMany(() => TraderSignal, traderSignal => traderSignal.signal, {eager: true})
   traderSignals: TraderSignal[];
   
