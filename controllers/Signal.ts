@@ -379,7 +379,7 @@ class Signal extends Controller {
         if (status == 'PENDING') {
           td.brokerId = orderId;
         }        
-        td.status = 'FILLED';
+        td.status = status == 'PENDING' ? 'FILLED' : status;
         td.strategy = traderChannel.strategy;
         const sResult = await __(manager.save(td));
     }
@@ -634,8 +634,10 @@ class Signal extends Controller {
 
     const  openSignals = await __(SignalModel.find({
       status:In(["filled"]),
-      symbol: symbol
+      symbol: symbol,
+      signalChannel: 'kplian_alert'
     }));
+    
     let res:any;
     /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
@@ -650,6 +652,38 @@ class Signal extends Controller {
           }
           
           traderSignal.status3 = 'PENDING';
+          traderSignal.brokerId3 = 1;
+          
+          binance.futuresCancelAll( signal.symbol );
+          await manager.save(traderSignal);
+        }
+      }
+      signal.status = 'closed';
+      await manager.save(signal);
+
+
+    }
+    return 'success';
+  }
+
+  async closeSignalById(signalId: number, manager: EntityManager): Promise<string> {
+
+    const  openSignals = await __(SignalModel.find({
+      signalId
+    }));
+    let res:any;
+    /*LOOP FOR STATUS OPEN SIGNALS*/
+    for (const signal of openSignals) {
+      for (const traderSignal of signal.traderSignals) {  
+        if (traderSignal.status == 'FILLED' && traderSignal.brokerId) {
+          const binance = this.initBinance(traderSignal.trader);
+          const order = await binance.futuresOrderStatus( signal.symbol, {orderId: traderSignal.brokerId} );
+          if (signal.buySell == 'SELL') {
+            binance.futuresMarketBuy( signal.symbol, order.executedQty, {type: 'MARKET',  reduceOnly: true});
+          } else if (signal.buySell == 'BUY') {
+            binance.futuresMarketSell( signal.symbol, order.executedQty , {type: 'MARKET',  reduceOnly: true});
+          }          
+          traderSignal.status3 = 'CLOSED';
           traderSignal.brokerId3 = 1;
           
           binance.futuresCancelAll( signal.symbol );
