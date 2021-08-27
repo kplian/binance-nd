@@ -9,10 +9,10 @@
  * @author No author
  *
  * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2020-09-18 13:47:54
+ * Last modified  : 2021-07-13 23:55:55
  */
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
-import { PxpEntity } from '../../../lib/pxp';
+import { PxpEntity } from '@pxp-nd/entities';
 
 @Entity({ name: 'tbin_simulation' })
 export default class Simulation extends PxpEntity {
@@ -23,12 +23,12 @@ export default class Simulation extends PxpEntity {
   @Column({ name: 'symbol', type: 'varchar', length: 50, nullable: false })
   symbol: string;
 
-  @Column({ name: 'type', type: 'varchar', length: 50,nullable: false })
+  @Column({ name: 'type', type: 'varchar', length: 50, nullable: false })
   type: string;
 
   @Column({ name: 'init_price', type: 'numeric', nullable: false })
   initPrice: number;
-  
+
   @Column({ name: 'end_price', type: 'numeric', nullable: false })
   endPrice: number;
 
@@ -48,6 +48,6 @@ export default class Simulation extends PxpEntity {
   percentagePnl: number;
 
   @Column({ name: 'pnl', type: 'numeric', nullable: false })
-  pnl: number;  
-  
+  pnl: number;
+
 }

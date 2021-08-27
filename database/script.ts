@@ -12,12 +12,11 @@
  */
 
 
-import { ScriptInterface } from '../../../lib/pxp/utils/Security';
+import { ScriptInterface } from '@pxp-nd/core';
+import { Role } from '@pxp-nd/entities';
+import { Subsystem } from '@pxp-nd/entities';
+import { Ui } from '@pxp-nd/entities';
 
-import Role from '../../pxp/entity/Role';
-import Subsystem from '../../pxp/entity/Subsystem';
-import Ui from '../../pxp/entity/Ui';
-import AccountStatusType from '../../pxp/entity/AccountStatusType';
 const scriptsArray: ScriptInterface[] = [];
 
 /***************************
@@ -87,7 +86,7 @@ scriptsArray.push({
     uiMenu.route = 'BIN_ALERT';
     uiMenu.createdBy = 'admin';
     uiMenu.order = 1;
-    uiMenu.parentId = rootUi ? rootUi.uiId : 0 ;
+    uiMenu.parentId = rootUi ? rootUi.uiId : 0;
     await em.save(uiMenu);
   }
 });

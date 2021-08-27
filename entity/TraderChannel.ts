@@ -9,10 +9,10 @@
  * @author No author
  *
  * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2020-09-18 13:47:54
+ * Last modified  : 2021-07-13 23:56:21
  */
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
-import { PxpEntity } from '../../../lib/pxp';
+import { PxpEntity } from '@pxp-nd/entities';
 import Signal from './Signal';
 import Trader from './Trader';
 
@@ -20,19 +20,19 @@ import Trader from './Trader';
 export default class TraderChannel extends PxpEntity {
 
   @PrimaryGeneratedColumn({ name: 'trader_channel_id' })
-  traderChannelId: number;  
+  traderChannelId: number;
 
   @Column({ name: 'status', type: 'varchar', length: 50, nullable: false })
-  status: string; 
+  status: string;
 
   @Column({ name: 'channel', type: 'varchar', length: 50, nullable: false })
-  channel: string; 
+  channel: string;
 
   @Column({ name: 'broker', type: 'varchar', length: 50, nullable: false })
-  broker: string; 
+  broker: string;
 
   @Column({ name: 'strategy', type: 'varchar', length: 150, nullable: false })
-  strategy: string; 
+  strategy: string;
 
 
   @ManyToOne(() => Trader, trader => trader.traderChannels, {
@@ -40,5 +40,5 @@ export default class TraderChannel extends PxpEntity {
   })
   @JoinColumn({ name: 'trader_id' })
   trader: Trader;
-  
+
 }

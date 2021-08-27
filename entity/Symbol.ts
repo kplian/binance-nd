@@ -9,10 +9,10 @@
  * @author No author
  *
  * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2020-09-18 13:47:54
+ * Last modified  : 2021-07-13 23:56:02
  */
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
-import { PxpEntity } from '../../../lib/pxp';
+import { PxpEntity } from '@pxp-nd/entities';
 
 @Entity({ name: 'tbin_symbol' })
 export default class Symbol extends PxpEntity {
@@ -24,12 +24,12 @@ export default class Symbol extends PxpEntity {
   code: string;
 
   @Column({ name: 'quantity_precision', type: 'numeric' })
-  quantityPrecision: number;  
+  quantityPrecision: number;
 
-  @Column({ name: 'price_precision', type: 'numeric', nullable: true})
-  pricePrecision: number;  
+  @Column({ name: 'price_precision', type: 'numeric', nullable: true })
+  pricePrecision: number;
 
-  @Column({ name: 'auto_trade', type: 'varchar', nullable: true})
-  autoTrade: string; 
-  
+  @Column({ name: 'auto_trade', type: 'varchar', nullable: true })
+  autoTrade: string;
+
 }

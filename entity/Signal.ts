@@ -9,10 +9,10 @@
  * @author No author
  *
  * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2020-09-18 13:47:54
+ * Last modified  : 2021-07-13 23:48:19
  */
 import { Entity, PrimaryGeneratedColumn, Column, OneToMany } from 'typeorm';
-import { PxpEntity } from '../../../lib/pxp';
+import { PxpEntity } from '@pxp-nd/entities';
 import TraderSignal from './TraderSignal';
 
 @Entity({ name: 'tbin_signal' })
@@ -23,7 +23,7 @@ export default class Signal extends PxpEntity {
 
   @Column({ name: 'foreign_id', type: 'numeric', nullable: true })
   foreignId: number;
-  
+
   @Column({ name: 'message', type: 'varchar', nullable: false })
   message: string;
   // binance_spot, binance_futures
@@ -65,14 +65,14 @@ export default class Signal extends PxpEntity {
 
   @Column({ name: 'status', type: 'varchar', length: 50, nullable: true })
   status: string;
-  
+
   @Column({ name: 'mark_price_open', type: 'numeric', nullable: true })
   markPriceOpen: number;
 
-  @Column({ name: 'real_time_date', type: 'timestamp', nullable: true, default: () => 'clock_timestamp()'})
-  realTimeDate: Date; 
+  @Column({ name: 'real_time_date', type: 'timestamp', nullable: true, default: () => 'clock_timestamp()' })
+  realTimeDate: Date;
 
-  @OneToMany(() => TraderSignal, traderSignal => traderSignal.signal, {eager: true})
+  @OneToMany(() => TraderSignal, traderSignal => traderSignal.signal, { eager: true })
   traderSignals: TraderSignal[];
-  
+
 }
