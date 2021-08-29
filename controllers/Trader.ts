@@ -8,7 +8,7 @@
 * @author Jaime Rivera
 *
 * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2021-07-14 00:11:52
+ * Last modified  : 2021-08-28 19:34:56
 */
 import { EntityManager, } from 'typeorm';
 import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log } from '@pxp-nd/core';
@@ -69,6 +69,24 @@ class Trader extends Controller {
     const response = await binance.futuresCancel(params.symbol, { orderId: params.orderId })
     return { success: true }
   }
-}
 
+
+  @Post()
+  @ReadOnly(false)
+  @Authentication(true)
+  async getPositions(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+
+    const trader = await __(TraderModel.findOne(params.traderId as number));
+    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const binance = new Binance().options({
+      APIKEY: apiKey,
+      APISECRET: apiSecret,
+      test: process.env.NODE_ENV == 'development' ? true : false
+    });
+    const response = await binance.futuresAccount();
+    const positions = response.positions.filter((position: any) => (position.positionAmt) as number > 0);
+    return positions;
+  }
+}
 export default Trader;

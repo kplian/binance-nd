@@ -356,24 +356,22 @@ class Alert extends Controller {
 
   async str(alert: AlertModel, alertPrev: any, lastAction: any, manager: EntityManager): Promise<AlertModel> {
     let res: AlertModel;
-    if (alert.type == 'Str buy') {
-      if (lastAction && lastAction.action == 'sell') {
-        alert.action = 'stop_sell';
-        alert.actionPreviousPrice = lastAction.price;
-        alert.pnlPercentage = ((alert.price * 100 / alert.actionPreviousPrice) - 100) * -1;
-        await this.generateSignal('Str', alert, manager);
-      }
+    if (alert.type == 'Str buy' && alert.plot0 && lastAction.action == 'sell') {
+      alert.action = 'stop_sell';
+      alert.actionPreviousPrice = lastAction.price;
+      alert.pnlPercentage = ((alert.price * 100 / alert.actionPreviousPrice) - 100) * -1;
+      //await this.generateSignal('Str', alert, manager);
+    } else if (alert.type == 'Str buy' && !alert.plot0) {
       alert.action = 'buy';
-      await this.generateSignal('Str', alert, manager);
-    } else if (alert.type == 'Str sell') {
-      if (lastAction && lastAction.action == 'buy') {
-        alert.action = 'stop_buy';
-        alert.actionPreviousPrice = lastAction.price;
-        alert.pnlPercentage = (alert.price * 100 / alert.actionPreviousPrice) - 100;
-        await this.generateSignal('Str', alert, manager);
-      }
+      //await this.generateSignal('Str', alert, manager);
+    } else if (alert.type == 'Str sell' && alert.plot0 && lastAction.action == 'buy') {
+      alert.action = 'stop_buy';
+      alert.actionPreviousPrice = lastAction.price;
+      alert.pnlPercentage = (alert.price * 100 / alert.actionPreviousPrice) - 100;
+      //await this.generateSignal('Str', alert, manager);
+    } else if (alert.type == 'Str sell' && !alert.plot0) {
       alert.action = 'sell';
-      await this.generateSignal('Str', alert, manager);
+      //await this.generateSignal('Str', alert, manager);
     }
     res = await __(manager.save(alert));
     return res;
@@ -381,7 +379,7 @@ class Alert extends Controller {
 
   async generateSignal(type: string, alert: AlertModel, manager: EntityManager): Promise<string> {
     const m = new Telegram('binance');
-    m.message({ message: `TYPE: ${type}📈 \nSYMBOL: ${alert.ticker}📈 \nACTION: ${alert.action} \nPRICE: ${alert.marketPrice} \nPREVIOUS PRICE: ${alert.actionPreviousPrice}` }, manager);
+    m.message({ message: `TYPE: ${type}📈 \nSYMBOL: ${alert.ticker}📈 \nACTION: ${alert.action} \nPRICE: ${alert.marketPrice} \nPREVIOUS PRICE: ${alert.actionPreviousPrice} \nPNL: ${alert.pnlPercentage}` }, manager);
     const s = new Signal('binance');
     if (alert.action == 'stop_sell' || alert.action == 'stop_buy') {
       await s.closeSignal(alert.ticker.slice(0, -4), alert.action, manager);
@@ -392,7 +390,6 @@ class Alert extends Controller {
           broker: "binance_futures",
           status: "filled",
           marketPrice: alert.marketPrice,
-          entryPrice: alert.price,
           signalChannel: "kplian_alert",
           buySell: alert.action == 'buy' ? "BUY" : 'SELL',
           symbol: alert.ticker.slice(0, -4)

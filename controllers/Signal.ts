@@ -9,13 +9,14 @@
  * @author Jaime Rivera
  *
  * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2021-07-14 00:02:39
+ * Last modified  : 2021-08-28 22:47:12
  */
 import { EntityManager, getManager, In } from 'typeorm';
 import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log, Model } from '@pxp-nd/core';
 import SignalModel from '../entity/Signal';
 import TraderModel from '../entity/Trader';
 import SymbolModel from '../entity/Symbol';
+import TraderSignalChangeModel from '../entity/TraderSignalChange';
 import axios, { AxiosRequestConfig } from 'axios';
 import crypto from 'crypto';
 import TraderSignal from '../entity/TraderSignal';
@@ -379,7 +380,7 @@ class Signal extends Controller {
       if (status == 'PENDING') {
         td.brokerId = orderId;
       }
-      td.status = 'FILLED';
+      td.status = status == 'PENDING' ? 'FILLED' : status;
       td.strategy = traderChannel.strategy;
       const sResult = await __(manager.save(td));
     }
@@ -639,8 +640,10 @@ class Signal extends Controller {
 
     const openSignals = await __(SignalModel.find({
       status: In(["filled"]),
-      symbol: symbol
+      symbol: symbol,
+      signalChannel: 'kplian_alert'
     }));
+
     let res: any;
     /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
@@ -665,6 +668,97 @@ class Signal extends Controller {
       await manager.save(signal);
 
 
+    }
+    return 'success';
+  }
+
+  async closeSignalById(signalId: number, manager: EntityManager): Promise<string> {
+
+    const openSignals = await __(SignalModel.find({
+      signalId
+    }));
+    let res: any;
+    /*LOOP FOR STATUS OPEN SIGNALS*/
+    for (const signal of openSignals) {
+      for (const traderSignal of signal.traderSignals) {
+        if (traderSignal.status == 'FILLED' && traderSignal.brokerId) {
+          const binance = this.initBinance(traderSignal.trader);
+          const account = await binance.futuresAccount();
+          const positions = account.positions.filter((position: any) => signal.symbol == position.symbol);
+          if (signal.buySell == 'SELL') {
+            binance.futuresMarketBuy(signal.symbol, Math.abs(positions[0].positionAmt as number), { type: 'MARKET', reduceOnly: true });
+          } else if (signal.buySell == 'BUY') {
+            binance.futuresMarketSell(signal.symbol, Math.abs(positions[0].positionAmt as number), { type: 'MARKET', reduceOnly: true });
+          }
+          traderSignal.status3 = 'CLOSED';
+          traderSignal.brokerId3 = 1;
+
+          binance.futuresCancelAll(signal.symbol);
+          await manager.save(traderSignal);
+        }
+      }
+      signal.status = 'closed';
+      await manager.save(signal);
+
+
+    }
+    return 'success';
+  }
+
+  async increment(signalId: number, percentage: number, manager: EntityManager): Promise<string> {
+
+    const openSignals = await __(SignalModel.find({
+      signalId
+    }));
+    let res: any;
+    /*LOOP FOR STATUS OPEN SIGNALS*/
+    for (const signal of openSignals) {
+      for (const traderSignal of signal.traderSignals) {
+        if (traderSignal.status == 'FILLED' && traderSignal.brokerId) {
+          const binance = this.initBinance(traderSignal.trader);
+          const account = await binance.futuresAccount();
+          const positions = account.positions.filter((position: any) => signal.symbol == position.symbol);
+          if (signal.buySell == 'SELL') {
+            //binance.futuresMarketSell(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET' });
+          } else if (signal.buySell == 'BUY') {
+            //binance.futuresMarketBuy(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET' });
+          }
+          const tsc = new TraderSignalChangeModel();
+          tsc.traderSignalId = traderSignal.traderSignalId;
+          tsc.type = 'increment';
+          tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
+          await manager.save(tsc);
+        }
+      }
+    }
+    return 'success';
+  }
+
+  async decrement(signalId: number, percentage: number, manager: EntityManager): Promise<string> {
+
+    const openSignals = await __(SignalModel.find({
+      signalId
+    }));
+    let res: any;
+    /*LOOP FOR STATUS OPEN SIGNALS*/
+    for (const signal of openSignals) {
+      for (const traderSignal of signal.traderSignals) {
+        if (traderSignal.status == 'FILLED' && traderSignal.brokerId) {
+          const binance = this.initBinance(traderSignal.trader);
+          const account = await binance.futuresAccount();
+          const positions = account.positions.filter((position: any) => signal.symbol == position.symbol);
+          if (signal.buySell == 'SELL') {
+            //binance.futuresMarketBuy(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET', reduceOnly: true });
+          } else if (signal.buySell == 'BUY') {
+            //binance.futuresMarketSell(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET', reduceOnly: true });
+          }
+          const tsc = new TraderSignalChangeModel();
+          tsc.traderSignalId = traderSignal.traderSignalId;
+          tsc.type = 'decrement';
+          tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
+          await manager.save(tsc);
+        }
+      }
     }
     return 'success';
   }
