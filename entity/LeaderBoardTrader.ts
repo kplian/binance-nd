@@ -34,6 +34,9 @@ export default class LeaderBoardTrader extends PxpEntity {
   @Column({ name: 'auto_trade', type: 'varchar', length: 1, nullable: false, default: 'N' })
   autoTrade: string;
 
+  @Column({ name: 'capital', type: 'numeric' })
+  capital: number;
+
   @OneToMany(() => LeaderBoardTraderPosition, leaderBoardTraderPosition => leaderBoardTraderPosition.leaderBoardTrader)
   leaderBoardTraderPositions: LeaderBoardTraderPosition[];
 

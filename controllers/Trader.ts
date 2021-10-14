@@ -10,7 +10,7 @@
 * Created at     : 2020-09-17 18:55:38
  * Last modified  : 2021-08-28 19:34:56
 */
-import { EntityManager, } from 'typeorm';
+import { EntityManager, In, } from 'typeorm';
 import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log } from '@pxp-nd/core';
 import TraderModel from '../entity/Trader';
 
@@ -26,15 +26,42 @@ class Trader extends Controller {
   async getBalance(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
 
     const trader = await __(TraderModel.findOne(params.traderId as number));
-    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
-    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
     const binance = new Binance().options({
       APIKEY: apiKey,
       APISECRET: apiSecret,
-      test: process.env.NODE_ENV == 'development' ? true : false
+      test: process.env.NODE_ENV == 'test' ? true : false
     });
     const response = await binance.futuresBalance();
+    
+
     return response;
+  }
+
+  @Post()
+  @ReadOnly(false)
+  @Authentication(true)
+  async updateBalance(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+
+    const traders = await __(TraderModel.find({where: { traderId: In([1,2]) }}));
+    for (const trader of traders) {
+      const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+      const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
+      const binance = new Binance().options({
+        APIKEY: apiKey,
+        APISECRET: apiSecret,
+        test: process.env.NODE_ENV == 'test' ? true : false
+      });
+      const response = await binance.futuresBalance();
+      for (const asset of response) {
+        if (asset.asset == 'USDT') {
+          trader.capital = asset.balance;
+          await __(manager.save(trader));
+        }
+      }
+    }
+    return traders;
   }
 
   @Post()
@@ -43,12 +70,12 @@ class Trader extends Controller {
   async getOrders(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
 
     const trader = await __(TraderModel.findOne(params.traderId as number));
-    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
-    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
     const binance = new Binance().options({
       APIKEY: apiKey,
       APISECRET: apiSecret,
-      test: process.env.NODE_ENV == 'development' ? true : false
+      test: process.env.NODE_ENV == 'test' ? true : false
     });
     const response = await binance.futuresOpenOrders();
     return response;
@@ -59,12 +86,12 @@ class Trader extends Controller {
   @Authentication(true)
   async cancel(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
     const trader = await __(TraderModel.findOne(params.traderId as number));
-    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
-    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
     const binance = new Binance().options({
       APIKEY: apiKey,
       APISECRET: apiSecret,
-      test: process.env.NODE_ENV == 'development' ? true : false
+      test: process.env.NODE_ENV == 'test' ? true : false
     });
     const response = await binance.futuresCancel(params.symbol, { orderId: params.orderId })
     return { success: true }
@@ -77,12 +104,12 @@ class Trader extends Controller {
   async getPositions(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
 
     const trader = await __(TraderModel.findOne(params.traderId as number));
-    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
-    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
     const binance = new Binance().options({
       APIKEY: apiKey,
       APISECRET: apiSecret,
-      test: process.env.NODE_ENV == 'development' ? true : false
+      test: process.env.NODE_ENV == 'test' ? true : false
     });
     const response = await binance.futuresAccount();
     const positions = response.positions.filter((position: any) => (position.positionAmt) as number > 0);

@@ -11,7 +11,7 @@
  * Created at     : 2020-09-17 18:55:38
  * Last modified  : 2021-08-28 22:47:12
  */
-import { EntityManager, getManager, In } from 'typeorm';
+import { EntityManager, getManager, In, MetadataAlreadyExistsError } from 'typeorm';
 import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log, Model } from '@pxp-nd/core';
 import SignalModel from '../entity/Signal';
 import TraderModel from '../entity/Trader';
@@ -282,12 +282,12 @@ class Signal extends Controller {
   }
 
   initBinance(trader: TraderModel): any {
-    const apiSecret = process.env.NODE_ENV == 'development' ? trader.testApiSecret : trader.apiSecret;
-    const apiKey = process.env.NODE_ENV == 'development' ? trader.testApiId : trader.apiId;
+    const apiSecret = process.env.NODE_ENV == 'test' ? trader.testApiSecret : trader.apiSecret;
+    const apiKey = process.env.NODE_ENV == 'test' ? trader.testApiId : trader.apiId;
     const binance = new Binance().options({
       APIKEY: apiKey,
       APISECRET: apiSecret,
-      test: process.env.NODE_ENV == 'development' ? true : false
+      test: process.env.NODE_ENV == 'test' ? true : false
     });
     return binance;
   }
@@ -313,7 +313,7 @@ class Signal extends Controller {
     } else if (broker == 'binance_spot') {
       response = await binance.balance();
     }
-    console.log(response);
+    
     let balanceUsdt = {};
     response.forEach((account: any) => {
       if (account.asset == 'USDT') {
@@ -337,7 +337,7 @@ class Signal extends Controller {
       const binance = this.initBinance(traderChannel.trader);
       const balance = await this.getBalance(traderChannel.broker, binance);
       const tradeAmount = traderChannel.trader.amountToTrade == 0 ? balance.balance * traderChannel.trader.percentageToTrade / 100 : traderChannel.trader.amountToTrade;
-      console.log('gtradeamount', tradeAmount);
+      
       let orderId = 'BALANCE';
       let quantity = 0;
       if (balance.availableBalance > tradeAmount && (tradeAmount * traderChannel.trader.leverage) > 5) {
@@ -353,7 +353,8 @@ class Signal extends Controller {
         }
 
         let res;
-        if (quantity > 0) {
+        let existPosition = await  this.existPosition(traderChannel, message, quantity, binance, manager);
+        if (quantity > 0 && !existPosition) {
           res = await this.applyStrategyPre(traderChannel, message, quantity, binance, manager);
           if (res.orderId) {
             orderId = res.orderId;
@@ -361,6 +362,8 @@ class Signal extends Controller {
             orderId = 'ERROR';
             console.log('ERROR OPENING SIGNAL:', res);
           }
+        } else if (existPosition) {
+          orderId = "1";
         }
 
       }
@@ -385,6 +388,18 @@ class Signal extends Controller {
       const sResult = await __(manager.save(td));
     }
     return 1;
+  }
+
+  async existPosition(trader: TraderChannel, message: Record<string, unknown>, quantity: number, binance: any, manager: EntityManager): Promise<boolean> {
+    const response = await binance.futuresAccount();
+    const positions = response.positions.filter((position: any) => (position.positionAmt) as number > 0);
+    let res = false;
+    for (const position of positions) {
+      if (position.symbol ==  message.symbol) {
+        res = true;
+      }
+    }
+    return res;
   }
 
   easyCryptoRead(message: string): Record<string, unknown> {
@@ -569,7 +584,7 @@ class Signal extends Controller {
 
 
       if (signal.buySell == 'BUY') {
-        console.log('before', symbol);
+        
         const activatePrice = this.myRound(signal.entryPrice * 1.01, symbol.pricePrecision);
         res = await binance.futuresMarketSell(signal.symbol, order.executedQty, { workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true });
 
@@ -579,7 +594,7 @@ class Signal extends Controller {
       }
     } else if (trader.strategy == 'easy_fut_1') {
       if (signal.buySell == 'BUY') {
-        console.log('before', symbol);
+        
         const activatePrice = this.myRound(((signal.tp2 - signal.tp1) / 2 as number) + Number(signal.tp1), symbol.pricePrecision);
         res = await binance.futuresMarketSell(signal.symbol, order.executedQty, { workingType: 'MARK_PRICE', type: 'TRAILING_STOP_MARKET', activationPrice: activatePrice, priceProtect: true, callbackRate: 1, reduceOnly: true });
 
@@ -705,11 +720,17 @@ class Signal extends Controller {
     return 'success';
   }
 
-  async increment(signalId: number, percentage: number, manager: EntityManager): Promise<string> {
+  async increment(signalId: number, percentage: number, marketPrice:number, manager: EntityManager): Promise<string> {
 
     const openSignals = await __(SignalModel.find({
       signalId
     }));
+    
+    const symbol = await __(SymbolModel.findOne({
+      code: openSignals[0].symbol
+    }));
+    const exponent = Math.pow(10, symbol.quantityPrecision)
+        
     let res: any;
     /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
@@ -718,27 +739,39 @@ class Signal extends Controller {
           const binance = this.initBinance(traderSignal.trader);
           const account = await binance.futuresAccount();
           const positions = account.positions.filter((position: any) => signal.symbol == position.symbol);
-          if (signal.buySell == 'SELL') {
-            //binance.futuresMarketSell(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET' });
-          } else if (signal.buySell == 'BUY') {
-            //binance.futuresMarketBuy(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET' });
+          const finalPercentage = percentage > 100 ? 100 : percentage;
+          let quantity = Math.abs(positions[0].positionAmt as number) * finalPercentage / 100;
+          quantity = Math.round(quantity * exponent) / exponent;
+          console.log('incrememnt', positions[0], traderSignal.trader, marketPrice);
+          if (Math.abs(positions[0].positionAmt as number) / traderSignal.trader.leverage * marketPrice < 0.05 * traderSignal.trader.capital) {
+            if (quantity > 0) {
+              if (signal.buySell == 'SELL') {
+                binance.futuresMarketSell(signal.symbol, quantity, { type: 'MARKET' });
+              } else if (signal.buySell == 'BUY') {
+                binance.futuresMarketBuy(signal.symbol, quantity, { type: 'MARKET' });
+              }
+              const tsc = new TraderSignalChangeModel();
+              tsc.traderSignalId = traderSignal.traderSignalId;
+              tsc.type = 'increment';
+              tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
+              await manager.save(tsc);
+            }
           }
-          const tsc = new TraderSignalChangeModel();
-          tsc.traderSignalId = traderSignal.traderSignalId;
-          tsc.type = 'increment';
-          tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
-          await manager.save(tsc);
         }
       }
     }
     return 'success';
   }
 
-  async decrement(signalId: number, percentage: number, manager: EntityManager): Promise<string> {
+  async decrement(signalId: number, percentage: number,marketPrice:number, manager: EntityManager): Promise<string> {
 
     const openSignals = await __(SignalModel.find({
       signalId
     }));
+    const symbol = await __(SymbolModel.findOne({
+      code: openSignals[0].symbol
+    }));
+    const exponent = Math.pow(10, symbol.quantityPrecision)
     let res: any;
     /*LOOP FOR STATUS OPEN SIGNALS*/
     for (const signal of openSignals) {
@@ -747,16 +780,20 @@ class Signal extends Controller {
           const binance = this.initBinance(traderSignal.trader);
           const account = await binance.futuresAccount();
           const positions = account.positions.filter((position: any) => signal.symbol == position.symbol);
-          if (signal.buySell == 'SELL') {
-            //binance.futuresMarketBuy(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET', reduceOnly: true });
-          } else if (signal.buySell == 'BUY') {
-            //binance.futuresMarketSell(signal.symbol, Math.abs(positions[0].positionAmt as number) * percentage / 100, { type: 'MARKET', reduceOnly: true });
+          let quantity = Math.abs(positions[0].positionAmt as number) * percentage / 100;
+          quantity = Math.round(quantity * exponent) / exponent;
+          if (quantity > 0) {
+            if (signal.buySell == 'SELL') {
+              binance.futuresMarketBuy(signal.symbol, quantity, { type: 'MARKET', reduceOnly: true });
+            } else if (signal.buySell == 'BUY') {
+              binance.futuresMarketSell(signal.symbol, quantity, { type: 'MARKET', reduceOnly: true });
+            }
+            const tsc = new TraderSignalChangeModel();
+            tsc.traderSignalId = traderSignal.traderSignalId;
+            tsc.type = 'decrement';
+            tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
+            await manager.save(tsc);
           }
-          const tsc = new TraderSignalChangeModel();
-          tsc.traderSignalId = traderSignal.traderSignalId;
-          tsc.type = 'decrement';
-          tsc.amount = Math.abs(positions[0].positionAmt as number) * percentage / 100;
-          await manager.save(tsc);
         }
       }
     }

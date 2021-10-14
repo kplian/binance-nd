@@ -52,6 +52,8 @@ export default class Trader extends PxpEntity {
   @Column({ name: 'margin_mode', type: 'varchar', length: 50, nullable: true })
   marginMode: string;
 
+  @Column({ name: 'capital', type: 'numeric' })
+  capital: number;
 
   @OneToMany(() => TraderSignal, traderSignal => traderSignal.trader)
   traderSignals: TraderSignal[];

@@ -33,4 +33,7 @@ export default class LeaderBoardTraderPositionChange extends PxpEntity {
   @Column({ name: 'percentage', type: 'numeric' })
   percentage: number;
 
+  @Column({ name: 'mark_price', type: 'numeric' })
+  markPrice: number;
+
 }

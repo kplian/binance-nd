@@ -8,7 +8,7 @@
 * @author Jaime Rivera
 *
 * Created at     : 2020-09-17 18:55:38
- * Last modified  : 2021-08-28 23:23:27
+ * Last modified  : 2021-08-29 08:24:26
 */
 import { EntityManager, getManager, } from 'typeorm';
 import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log } from '@pxp-nd/core';
@@ -58,109 +58,153 @@ class LeaderBoardTrader extends Controller {
     const flag = await GlobalData.findOne({ data: 'bin_processing_leaderboard_flag' });
     if (flag) {
       if (flag.value == 'true') {
-        throw new PxpError(400, 'Already processing pending flows');
+        throw new PxpError(400, 'Already processing leaderboard');
       }
       flag.value = 'true';
       await getManager().save(flag);
-      const traders = await LeaderBoardTraderModel.find({ status: 'active' });
-      let common = new Common();
-      const s = new Signal('binance');
-      for (let trader of traders) {
-        this.conf.data = JSON.stringify({
-          "encryptedUid": trader.uuid,
-          "tradeType": "PERPETUAL"
-        });
-        const res = await axios(this.conf);
-
-        //CLOSE POSITIONS
-        let traderPositions = await LeaderBoardTraderPositionModel.find({ status: 'open', leaderBoardTrader: trader });
-        for (let position of traderPositions) {
-          const size = this.getSize(position, res.data.data.otherPositionRetList);
-          if (size == -1) {
-            position.status = 'closed';
-            position.closeDate = new Date();
-            const marketPrice = await common.binanceGetMarkPrice(position.symbol);
-            position.closePrice = marketPrice;
-            position.roe = position.direction == 'buy' ? ((position.closePrice * 100 / position.entryPrice) - 100) : (((position.closePrice * 100 / position.entryPrice) - 100) * -1);
-            manager.save(position);
-            const m = new Telegram('binance');
-            m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nENTRY PRICE: ${position.entryPrice} \nCLOSE PRICE: ${position.closePrice} \nROE: ${position.roe}` }, manager);
-            if (position.signalId) {
-              await s.closeSignalById(position.signalId, manager);
-            }
-          } else if (position.size != 0 && position.size != size) {
-            const tsc = new LeaderBoardTraderPositionChange();
-            tsc.leaderBoardTraderPositionId = position.leaderBoardTraderPositionId;
-            tsc.amount = size;
-            if (size > position.size) {
-              tsc.type = 'increment';
-              tsc.percentage = ((size / position.size) * 100) - 100;
-              await s.increment(position.signalId, ((size / position.size) * 100) - 100, manager);
-            } else {
-              tsc.type = 'decrement';
-              tsc.percentage = 100 - ((size / position.size) * 100);
-              await s.decrement(position.signalId, 100 - ((size / position.size) * 100), manager);
-            }
-            await manager.save(tsc);
-
-          }
-        }
-
-        //OPEN POSITIONS
-        if (res.data.data.otherPositionRetList) {
-          console.log(res.data.data.otherPositionRetList, trader.name);
-          for (let position of res.data.data.otherPositionRetList) {
-            let direction = 'buy';
-            if (position.amount < 0) {
-              direction = 'sell';
-            }
-            let traderPosition = await LeaderBoardTraderPositionModel.findOne({ status: 'open', symbol: position.symbol, direction, leaderBoardTrader: trader });
-            console.log(traderPosition);
-            if (!traderPosition && position.symbol != 'BTCUSDT_210924') {
-
-              traderPosition = new LeaderBoardTraderPositionModel();
+      try {
+        const traders = await LeaderBoardTraderModel.find({ status: 'active' });
+        let common = new Common();
+        const s = new Signal('binance');
+        for (let trader of traders) {
+          this.conf.data = JSON.stringify({
+            "encryptedUid": trader.uuid,
+            "tradeType": "PERPETUAL"
+          });
+          this.conf.url = 'https://www.binance.com/bapi/futures/v1/public/future/leaderboard/getOtherPosition';
+          const res = await axios(this.conf);
+          
+          //CLOSE POSITIONS
+          let traderPositions = await LeaderBoardTraderPositionModel.find({ status: 'open', leaderBoardTrader: trader });
+          for (let position of traderPositions) {
+            const size = this.getSize(position, res.data.data.otherPositionRetList);
+            if (size == -1) {
+              position.status = 'closed';
+              position.closeDate = new Date();
               const marketPrice = await common.binanceGetMarkPrice(position.symbol);
-              traderPosition.entryPrice = marketPrice;
-              traderPosition.symbol = position.symbol;
-              traderPosition.direction = direction;
-              traderPosition.size = Math.abs(position.size as number);
-              traderPosition.status = 'open';
-              traderPosition.leaderBoardTrader = trader;
+              position.closePrice = marketPrice;
+              position.roe = position.direction == 'buy' ? ((position.closePrice * 100 / position.entryPrice) - 100) : (((position.closePrice * 100 / position.entryPrice) - 100) * -1);
+              manager.save(position);
               const m = new Telegram('binance');
-              m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${direction} \nPRICE: ${position.entryPrice} \n` }, manager);
-              if (trader.autoTrade == 'Y') {
-                //if (traderPosition.direction == 'buy') {
-                const resSignal = await s.addForm({
-                  broker: "binance_futures",
-                  status: "filled",
-                  marketPrice: marketPrice,
-                  signalChannel: "kplian_leaderboard",
-                  buySell: traderPosition.direction == 'buy' ? "BUY" : 'SELL',
-                  symbol: position.symbol
-                }, manager);
-
-                if (resSignal.status == 'open' || resSignal.status == 'filled') {
-                  traderPosition.signalId = resSignal.signalId;
-                }
-                //}
-
-
+              m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nENTRY PRICE: ${position.entryPrice} \nCLOSE PRICE: ${position.closePrice} \nROE: ${position.roe}` }, manager);
+              if (position.signalId) {
+                await s.closeSignalById(position.signalId, manager);
               }
-              traderPosition = await manager.save(traderPosition);
+            } else if (position.size != 0 && position.size != size) {
               const tsc = new LeaderBoardTraderPositionChange();
-              tsc.leaderBoardTraderPositionId = traderPosition.leaderBoardTraderPositionId;
-              tsc.type = 'open';
-              tsc.amount = Math.abs(position.size as number);
-              tsc.percentage = 100;
+              tsc.leaderBoardTraderPositionId = position.leaderBoardTraderPositionId;
+              const marketPrice = await common.binanceGetMarkPrice(position.symbol);
+              tsc.amount = size;
+              if (size > position.size) {
+                tsc.type = 'increment';
+                tsc.percentage = ((size / position.size) * 100) - 100;
+                if (position.signalId) {
+                  await s.increment(position.signalId, ((size / position.size) * 100) - 100,marketPrice, manager);
+                }
+                const m = new Telegram('binance');
+                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Increment \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
+              } else {
+                tsc.type = 'decrement';
+                tsc.percentage = 100 - ((size / position.size) * 100);
+                if (position.signalId) {
+                  await s.decrement(position.signalId, 100 - ((size / position.size) * 100),marketPrice, manager);
+                }
+                const m = new Telegram('binance');
+                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Decrement \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
+              }
+              position.size = size;
+              tsc.markPrice = marketPrice;
               await manager.save(tsc);
+              await manager.save(position);
+
+            }
+          }
+
+          //OPEN POSITIONS
+          if (res.data.data.otherPositionRetList) {
+            
+            for (let position of res.data.data.otherPositionRetList) {
+              let direction = 'buy';
+              if (position.amount < 0) {
+                direction = 'sell';
+              }
+              let traderPosition = await LeaderBoardTraderPositionModel.findOne({ status: 'open', symbol: position.symbol, direction, leaderBoardTrader: trader });
+              if (!traderPosition && position.symbol != 'BTCUSDT_210924') {
+
+                traderPosition = new LeaderBoardTraderPositionModel();
+                const marketPrice = await common.binanceGetMarkPrice(position.symbol);
+                traderPosition.entryPrice = marketPrice;
+                traderPosition.symbol = position.symbol;
+                traderPosition.direction = direction;
+                traderPosition.size = Math.abs(position.amount as number);
+                traderPosition.status = 'open';
+                traderPosition.leaderBoardTrader = trader;
+                const m = new Telegram('binance');
+                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${direction} \nPRICE: ${position.entryPrice} \n` }, manager);
+                if (trader.autoTrade == 'Y') {
+                  if (traderPosition.direction == 'buy') {
+                    const resSignal = await s.addForm({
+                      broker: "binance_futures",
+                      status: "filled",
+                      marketPrice: marketPrice,
+                      signalChannel: "kplian_leaderboard",
+                      buySell: traderPosition.direction == 'buy' ? "BUY" : 'SELL',
+                      symbol: position.symbol
+                    }, manager);
+
+                    if (resSignal.status == 'open' || resSignal.status == 'filled') {
+                      traderPosition.signalId = resSignal.signalId;
+                    }
+                  }
+
+
+                }
+                traderPosition = await manager.save(traderPosition);
+                const tsc = new LeaderBoardTraderPositionChange();
+                tsc.leaderBoardTraderPositionId = traderPosition.leaderBoardTraderPositionId;
+                tsc.type = 'open';
+                tsc.amount =Math.abs(position.amount as number);
+                tsc.percentage = 100;
+                await manager.save(tsc);
+              }
             }
           }
         }
+      } catch (error) {
+        flag.value = 'false';
+        const m = new Telegram('binance');
+        const errorString = JSON.stringify(error, Object.getOwnPropertyNames(error))
+        m.message({ message: `Error in generatePositions: ${errorString}` }, manager);
+        await getManager().save(flag);
+        throw new PxpError(400, error.message);
       }
       flag.value = 'false';
       await getManager().save(flag);
     }
     return { success: true };
+  }
+
+  @Post()
+  @ReadOnly(false)
+  @Authentication(true)
+  async getCapital(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+    const traders = await LeaderBoardTraderModel.find({ status: 'active' });    
+    const s = new Signal('binance');
+    for (let trader of traders) {
+      this.conf.data = JSON.stringify({
+        "encryptedUid": trader.uuid,
+        "tradeType": "PERPETUAL"
+      });
+      this.conf.url = 'https://www.binance.com/bapi/futures/v1/public/future/leaderboard/getOtherPerformance';
+      const res = await axios(this.conf);
+      
+      const data = res.data.data;
+      if (data[0].value != 0 && data[1].value != 0) {
+        trader.capital = 100 * data[1].value / (data[0].value * 100);
+        await manager.save(trader);
+      }
+    }
+    return {success: true};
   }
 
   getSize(positionSearch: LeaderBoardTraderPositionModel, positionsArray: any): number {
