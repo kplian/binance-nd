@@ -48,6 +48,12 @@ export default class LeaderBoardTraderPosition extends PxpEntity {
   @Column({ name: 'size', type: 'numeric' })
   size: number;
 
+  @Column({ name: 'percentage_of_capital', type: 'numeric' })
+  percentageOfCapital: number;
+
+  @Column({ name: 'leverage', type: 'numeric' })
+  leverage: number;
+
   @ManyToOne(() => LeaderBoardTrader, leaderBoardTrader => leaderBoardTrader.leaderBoardTraderPositions, {
     eager: true
   })

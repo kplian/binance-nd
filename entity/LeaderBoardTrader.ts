@@ -37,6 +37,8 @@ export default class LeaderBoardTrader extends PxpEntity {
   @Column({ name: 'capital', type: 'numeric' })
   capital: number;
 
+  
+
   @OneToMany(() => LeaderBoardTraderPosition, leaderBoardTraderPosition => leaderBoardTraderPosition.leaderBoardTrader)
   leaderBoardTraderPositions: LeaderBoardTraderPosition[];
 

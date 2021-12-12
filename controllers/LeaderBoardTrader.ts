@@ -10,8 +10,8 @@
 * Created at     : 2020-09-17 18:55:38
  * Last modified  : 2021-08-29 08:24:26
 */
-import { EntityManager, getManager, } from 'typeorm';
-import { Controller, Post, DbSettings, ReadOnly, Authentication, PxpError, __, Log } from '@pxp-nd/core';
+import { EntityManager, getManager, IsNull } from 'typeorm';
+import { Controller, Post, Get, DbSettings, ReadOnly, Authentication, PxpError, __, Log } from '@pxp-nd/core';
 import LeaderBoardTraderModel from '../entity/LeaderBoardTrader';
 import LeaderBoardTraderPositionModel from '../entity/LeaderBoardTraderPosition';
 
@@ -86,7 +86,7 @@ class LeaderBoardTrader extends Controller {
               position.roe = position.direction == 'buy' ? ((position.closePrice * 100 / position.entryPrice) - 100) : (((position.closePrice * 100 / position.entryPrice) - 100) * -1);
               manager.save(position);
               const m = new Telegram('binance');
-              m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nENTRY PRICE: ${position.entryPrice} \nCLOSE PRICE: ${position.closePrice} \nROE: ${position.roe}` }, manager);
+              m.message({ message: `TYPE: Leaderboard ${trader.name}  ${trader.uuid} 📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nENTRY PRICE: ${position.entryPrice} \nCLOSE PRICE: ${position.closePrice} \nROE: ${position.roe}` }, manager);
               if (position.signalId) {
                 await s.closeSignalById(position.signalId, manager);
               }
@@ -102,7 +102,7 @@ class LeaderBoardTrader extends Controller {
                   await s.increment(position.signalId, ((size / position.size) * 100) - 100,marketPrice, manager);
                 }
                 const m = new Telegram('binance');
-                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Increment \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
+                m.message({ message: `TYPE: Leaderboard ${trader.name}  ${trader.uuid}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Increment \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
               } else {
                 tsc.type = 'decrement';
                 tsc.percentage = 100 - ((size / position.size) * 100);
@@ -110,7 +110,7 @@ class LeaderBoardTrader extends Controller {
                   await s.decrement(position.signalId, 100 - ((size / position.size) * 100),marketPrice, manager);
                 }
                 const m = new Telegram('binance');
-                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Decrement \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
+                m.message({ message: `TYPE: Leaderboard ${trader.name}  ${trader.uuid}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${position.direction} \nTYPE: Decrement \nPERCENTAGE: ${tsc.percentage} \nMARKET PRICE: ${marketPrice}` }, manager);
               }
               position.size = size;
               tsc.markPrice = marketPrice;
@@ -133,6 +133,14 @@ class LeaderBoardTrader extends Controller {
 
                 traderPosition = new LeaderBoardTraderPositionModel();
                 const marketPrice = await common.binanceGetMarkPrice(position.symbol);
+                let roe = (position.markPrice * 100 / position.entryPrice) - 100;
+                if (direction == 'sell') {
+                  roe = roe * -1;
+                }
+                const roeBinance = position.roe * 100;
+                traderPosition.leverage = Math.round(roeBinance / roe * 100) / 100;
+                traderPosition.percentageOfCapital = Math.abs(position.amount as number) * position.entryPrice / traderPosition.leverage / trader.capital * 100;
+                traderPosition.percentageOfCapital = Math.round(traderPosition.percentageOfCapital * 100) / 100;
                 traderPosition.entryPrice = marketPrice;
                 traderPosition.symbol = position.symbol;
                 traderPosition.direction = direction;
@@ -140,7 +148,7 @@ class LeaderBoardTrader extends Controller {
                 traderPosition.status = 'open';
                 traderPosition.leaderBoardTrader = trader;
                 const m = new Telegram('binance');
-                m.message({ message: `TYPE: Leaderboard ${trader.name}📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${direction} \nPRICE: ${position.entryPrice} \n` }, manager);
+                m.message({ message: `TYPE: Leaderboard ${trader.name} ${trader.uuid} 📈 \nSYMBOL: ${position.symbol}📈 \nACTION: ${direction} \nPRICE: ${position.entryPrice} \nLEVERAGE: ${traderPosition.leverage} \nPERCENTAGE: ${traderPosition.percentageOfCapital} \n` }, manager);
                 if (trader.autoTrade == 'Y') {
                   if (traderPosition.direction == 'buy') {
                     const resSignal = await s.addForm({
@@ -206,6 +214,80 @@ class LeaderBoardTrader extends Controller {
     }
     return {success: true};
   }
+
+  @Get()
+  @ReadOnly(true)
+  @Authentication(false)
+  async getPositions(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+    
+    this.conf.data = JSON.stringify({
+      "encryptedUid": params.uuid,
+      "tradeType": "PERPETUAL"
+    });
+    this.conf.url = 'https://www.binance.com/bapi/futures/v1/public/future/leaderboard/getOtherPosition';
+    const res = await axios(this.conf);
+    
+    return res.data;
+  }
+
+  @Post()
+  @ReadOnly(false)
+  @Authentication(true)
+  async openNegativePositions(params: Record<string, unknown>, manager: EntityManager): Promise<any> {
+    const trader = await LeaderBoardTraderModel.findOne({ status: 'active', uuid: params.uuid as string });
+    this.conf.data = JSON.stringify({
+      "encryptedUid": params.uuid,
+      "tradeType": "PERPETUAL"
+    });
+    const response = [];
+    this.conf.url = 'https://www.binance.com/bapi/futures/v1/public/future/leaderboard/getOtherPosition';
+    const res = await axios(this.conf);
+    let common = new Common();
+    const s = new Signal('binance');
+    if (trader) {
+      let traderPositions = await LeaderBoardTraderPositionModel.find({ status: 'open', leaderBoardTrader: trader, signalId: IsNull() });
+      for (let position of traderPositions) {
+        const size = this.getSize(position, res.data.data.otherPositionRetList);
+        if (size > 0) {
+          const marketPrice = await common.binanceGetMarkPrice(position.symbol);
+          if (marketPrice < position.entryPrice) {
+            if (trader.autoTrade == 'Y') {
+              if (position.direction == 'buy') {
+                response.push({
+                  broker: "binance_futures",
+                  status: "filled",
+                  marketPrice: marketPrice,
+                  signalChannel: "kplian_leaderboard",
+                  buySell: position.direction == 'buy' ? "BUY" : 'SELL',
+                  symbol: position.symbol
+                });
+                const resSignal = await s.addForm({
+                  broker: "binance_futures",
+                  status: "filled",
+                  marketPrice: marketPrice,
+                  signalChannel: "kplian_leaderboard",
+                  buySell: position.direction == 'buy' ? "BUY" : 'SELL',
+                  symbol: position.symbol
+                }, manager);
+
+                if (resSignal.status == 'open' || resSignal.status == 'filled') {
+                  position.signalId = resSignal.signalId;
+                }
+              }
+
+
+            }
+            position = await manager.save(position);
+          }
+        }
+
+      }
+    }
+    return response;
+    
+  }
+
+
 
   getSize(positionSearch: LeaderBoardTraderPositionModel, positionsArray: any): number {
     if (positionsArray) {
